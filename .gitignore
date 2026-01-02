@@ -1,4 +1,3 @@
-# Ignore any directory whose name contains "data" (case-sensitive)
-**/*data*/      # matches any folder with "data" in its name anywhere
-# Ignore all files within those directories
-**/*data*/**    # matches all files within those folders``
+
+/spectral_data/
+/training_data/
