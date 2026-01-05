@@ -124,7 +124,7 @@ def interpolate_spectrum(input_wavenumber, input_absorbance, low=898, high=3800)
         
     '''
 
-    tck = interpolate.splrep(input_wavenumber, input_absorbance, s=0)
+    tck = interpolate.make_splrep(input_wavenumber, input_absorbance, s=0)
     window = high - low + 1
     interpolated_wavenumber = np.linspace(low, high, window)
     interpolated_absorbance = interpolate.splev(interpolated_wavenumber, tck, der=0)

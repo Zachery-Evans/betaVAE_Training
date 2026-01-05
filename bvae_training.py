@@ -11,6 +11,17 @@ from keras import layers
 from scipy.stats import gaussian_kde
 from sklearn.model_selection import cross_val_score, KFold
 import random
+from spectrum_preprocessing import interpolate_spectrum
+
+def roundWavenumbers(dataframe):
+    """
+    Function for rounding the wavenumbers so that there is no mismatch between the machine 
+    precision of saving the files in Quasar and the wavenumbers output by the FTIR microscope
+    """
+    last_nonwavenum_idx = dataframe.columns.get_loc('1981.7 - 2095.8') + 1
+
+    dataframe = dataframe.rename(columns=lambda c: round(float(c), 1) if c not in dataframe.columns[:last_nonwavenum_idx] else c)
+    return dataframe
 
 def distribution_Selection(df, distributionIdx, numberOfSigmas):
     """
@@ -54,30 +65,30 @@ Build the Encoder
 """
 def build_encoder(input_dim, latent_dim): 
 
-    inputs = tf.keras.Input(shape=input_dim) 
+    inputs = keras.Input(shape=input_dim) 
     x = layers.Dense(128, activation="relu")(inputs) 
     x = layers.Dense(128, activation='relu')(x) 
     z_mean = layers.Dense(latent_dim, name="z_mean")(x) 
     z_logvar = layers.Dense(latent_dim, name="z_logvar")(x) 
 
-    return tf.keras.Model(inputs, [z_mean, z_logvar], name="encoder")
+    return keras.Model(inputs, [z_mean, z_logvar], name="encoder")
 
 """
 Build the Decoder 
 """
 def build_decoder(latent_dim, output_dim):
-    latent_inputs = tf.keras.Input(shape=latent_dim)
+    latent_inputs = keras.Input(shape=latent_dim)
     x = layers.Dense(128, activation="relu")(latent_inputs)
     x = layers.Dense(128, activation='relu')(x)
     outputs = layers.Dense(output_dim, activation="linear")(x)
-    return tf.keras.Model(latent_inputs, outputs, name="decoder")
+    return keras.Model(latent_inputs, outputs, name="decoder")
 
 
 """
 Reparameterization 
 
 """
-class Sampling(tf.keras.layers.Layer):
+class Sampling(keras.layers.Layer):
     def call(self, inputs):
         z_mean, z_log_var = inputs
         epsilon = tf.random.normal(shape=tf.shape(z_mean))
@@ -87,7 +98,7 @@ class Sampling(tf.keras.layers.Layer):
 Subclass of BetaVAE
 
 """
-class BetaVAE(tf.keras.Model):
+class BetaVAE(keras.Model):
     def __init__(self, encoder, decoder, beta, **kwargs):
         super().__init__(**kwargs)
         self.encoder = encoder
@@ -95,9 +106,9 @@ class BetaVAE(tf.keras.Model):
         self.beta = beta
         self.sampling = Sampling()
 
-        self.total_loss_tracker = tf.keras.metrics.Mean(name="loss")
-        self.recon_loss_tracker = tf.keras.metrics.Mean(name="recon_loss")
-        self.kl_loss_tracker = tf.keras.metrics.Mean(name="kl_loss")
+        self.total_loss_tracker = keras.metrics.Mean(name="loss")
+        self.recon_loss_tracker = keras.metrics.Mean(name="recon_loss")
+        self.kl_loss_tracker = keras.metrics.Mean(name="kl_loss")
 
     def call(self, inputs, training=False):
         z_mean, z_log_var = self.encoder(inputs)
@@ -142,7 +153,7 @@ class BetaVAE(tf.keras.Model):
             
             recon_loss = tf.reduce_mean(
                 tf.reduce_sum(
-                    tf.keras.losses.binary_crossentropy(data, reconstruction),
+                    keras.losses.binary_crossentropy(data, reconstruction),
                 )
             )
 
@@ -167,11 +178,11 @@ class BetaVAE(tf.keras.Model):
 Load and Format the data for k-fold validation of the beta-VAE model
 """
 
-path = './training data/'
+path = './training_data/'
 #List all of the files in the data directory.
 allFiles = os.listdir(path)
 # Take only the files that contain data pertaining to SMP65#010 
-trainingFiles = [file for file in allFiles if file.endswith('.csv') and 'SMP65' in file]
+trainingFiles = [file for file in allFiles if file.endswith('.csv') and 'SMP65' in file and 'full width' not in file]
 
 trainingFiles = sorted(trainingFiles, key=lambda x: int(re.search(r'(?<= )(.+?)(?=d)', x).group()))
 
@@ -179,6 +190,10 @@ trainingFiles = sorted(trainingFiles, key=lambda x: int(re.search(r'(?<= )(.+?)(
 trainingDataframeList = [pd.read_csv(path+file) for file in trainingFiles]
 
 test_df = trainingDataframeList[0]
+test_df = roundWavenumbers(test_df)
+
+last_nonwavenum_idx = test_df.columns.get_loc('1981.7 - 2095.8') + 1
+wavenumbers = test_df.columns[last_nonwavenum_idx:]
 
 masked_trainingDataframeList = []
 
@@ -188,7 +203,8 @@ for df in trainingDataframeList:
     selected_indexes, discarded_indexes, mask_selected, modePosition, areaPE = distribution_Selection(df, '1981.7 - 2095.8', stdDevs)
     masked_trainingDataframeList.append(df[mask_selected])
 
-last_nonwavenum_idx = test_df.columns.get_loc('1981.7 - 2095.8') + 1
+test_df = None # Clear memory
+trainingDataframeList = None # Clear memory
 
 # Lambda function to round all of the wavenumbers so that column labels are all matching, and then concatenate all the datasets together
 rawTrainingDataframe = pd.concat(
@@ -201,11 +217,32 @@ rawTrainingDataframe = pd.concat(
     ignore_index=True
 )
 
-wavenumbers = rawTrainingDataframe.columns[last_nonwavenum_idx:]
+masked_trainingDataframeList = None # Clear memory
+
+interpRawTrainingDataframe = pd.DataFrame()
+interpDataFramelist=[]
+# Interpolate the spectra to increase the accuracy of the model
+for index, row in rawTrainingDataframe.iterrows():
+    print(index)
+    row = row[last_nonwavenum_idx:]
+    frequencies = row.index.to_numpy()
+    frequencies = frequencies[::-1]  # Reverse the order for interpolation
+    spectrum = row.to_numpy()
+    spectrum = spectrum[::-1]  # Reverse the order for interpolation
+    interpolated_wavenumber, interpolated_spectrum = interpolate_spectrum(frequencies, spectrum, low=900, high=1800)
+    #interpRawTrainingDataframe = pd.concat([interpRawTrainingDataframe, pd.DataFrame(interpolated_spectrum, columns=interpolated_wavenumber)], ignore_index=True)
+    interpDataFramelist.append(pd.DataFrame([interpolated_spectrum], columns=interpolated_wavenumber))
+
+interpRawTrainingDataframe = pd.concat(interpDataFramelist, ignore_index=True)
+interpDataFramelist = None # Clear memory
+
+print(interpRawTrainingDataframe)
 
 """
 K-fold Validation
-"""
+
+*** Need to rework this section to properly implement k-fold validation for the interpolated data ***
+
 unique_samples = rawTrainingDataframe["Sample Name"].unique()
 n_folds = 5
 
@@ -214,6 +251,8 @@ for i, sid in enumerate(unique_samples):
     fold_map[sid] = i % n_folds
 
 rawTrainingDataframe["fold"] = rawTrainingDataframe["Sample Name"].map(fold_map)
+"""
+
 
 """
 Initialize the model, train the model and save. 
@@ -233,7 +272,7 @@ decoder = build_decoder(latent_dim, output_dim)
 
 vae = BetaVAE(encoder, decoder, beta=beta)
 
-vae.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=1e-4))
+vae.compile(optimizer=keras.optimizers.Adam(learning_rate=1e-4))
 
 vae.build(input_shape=(None,505))
 
@@ -246,13 +285,6 @@ print(vae.get_config())
 array = np.asarray(betaVAE_trainingData.values, dtype='float32')
 #array = array[None,:]
 vae.fit(array, epochs=epochs, batch_size=128)
-
-#keras.saving.save_model(vae ,"./vae/saved_model.keras")
-
-#keras.saving.save_model(encoder, "./new_encoder/saved_model.keras")
-
-#keras.saving.save_model(decoder, "./new_decoder/saved_model.keras")
-
 
 tf.saved_model.save(vae, "./new_vae/")
 tf.saved_model.save(encoder, './new_encoder/')
