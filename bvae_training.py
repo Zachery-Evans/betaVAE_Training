@@ -11,7 +11,8 @@ from keras import layers
 from scipy.stats import gaussian_kde
 from sklearn.model_selection import cross_val_score, KFold
 import random
-from spectrum_preprocessing import interpolate_spectrum
+#from spectrum_preprocessing import interpolate_spectrum
+import spectrum_preprocessing as sp
 
 def roundWavenumbers(dataframe):
     """
@@ -187,7 +188,7 @@ trainingFiles = [file for file in allFiles if file.endswith('.csv') and 'SMP65' 
 trainingFiles = sorted(trainingFiles, key=lambda x: int(re.search(r'(?<= )(.+?)(?=d)', x).group()))
 
 # Read all of the data and place the dataframes into a list
-trainingDataframeList = [pd.read_csv(path+file) for file in trainingFiles]
+trainingDataframeList = [pd.read_csv(path+file, low_memory=False, skiprows=[1,2]) for file in trainingFiles]
 
 test_df = trainingDataframeList[0]
 test_df = roundWavenumbers(test_df)
@@ -221,15 +222,53 @@ masked_trainingDataframeList = None # Clear memory
 
 interpRawTrainingDataframe = pd.DataFrame()
 interpDataFramelist=[]
+
 # Interpolate the spectra to increase the accuracy of the model
 for index, row in rawTrainingDataframe.iterrows():
-    print(index)
-    row = row[last_nonwavenum_idx:]
+    #print(index)
+    row = row[last_nonwavenum_idx:].fillna(0.0)
+
     frequencies = row.index.to_numpy()
     frequencies = frequencies[::-1]  # Reverse the order for interpolation
     spectrum = row.to_numpy()
     spectrum = spectrum[::-1]  # Reverse the order for interpolation
-    interpolated_wavenumber, interpolated_spectrum = interpolate_spectrum(frequencies, spectrum, low=900, high=1800)
+
+    interpolated_wavenumber, interpolated_spectrum = sp.interpolate_spectrum(frequencies, spectrum, low=900, high=1400)
+
+    baseline1 = sp.airpls(interpolated_spectrum)
+    corrected1 = interpolated_spectrum - baseline1
+
+    baseline2 = sp.polynomial_background(interpolated_wavenumber, corrected1, odr=2, s=0.006, fct='atq')[0]
+    corrected2 = corrected1 - baseline2
+
+    baseline3 = sp.rubberband_baseline(interpolated_wavenumber, corrected2)
+    corrected3 = corrected2 - baseline3
+
+    fingerprint_cm = interpolated_wavenumber
+    fingerprint_abs = corrected3
+
+    #apply the interpolation to the spectral window
+    interpolated_wavenumber, interpolated_absorbance = sp.interpolate_spectrum(f, a, 1500, 1800)
+    #calculate the baseline
+    baseline1 = sp.airpls(interpolated_absorbance)
+
+    #baseline correct the spectrum
+    corrected1 = interpolated_absorbance - baseline1
+
+    baseline2 = sp.rubberband_baseline(interpolated_wavenumber, corrected1)
+    corrected2 = corrected1 - baseline2
+
+    carbonyl_cm = interpolated_wavenumber
+    carbonyl_abs = corrected2
+
+    frequencies = np.concatenate((fingerprint_cm, carbonyl_cm))
+    spectrum = np.concatenate((fingerprint_abs, carbonyl_abs))
+
+    frequencies = row.index.to_numpy()
+    frequencies = frequencies[::-1]  # Reverse the order for interpolation
+    spectrum = row.to_numpy()
+    spectrum = spectrum[::-1]  # Reverse the order for interpolation
+    interpolated_wavenumber, interpolated_spectrum = sp.interpolate_spectrum(frequencies, spectrum, low=900, high=1800)
     #interpRawTrainingDataframe = pd.concat([interpRawTrainingDataframe, pd.DataFrame(interpolated_spectrum, columns=interpolated_wavenumber)], ignore_index=True)
     interpDataFramelist.append(pd.DataFrame([interpolated_spectrum], columns=interpolated_wavenumber))
 
@@ -262,19 +301,19 @@ betaVAE_trainingData = rawTrainingDataframe[wavenumbers]
 input_dim = len(wavenumbers)
 output_dim = input_dim
 
-latent_dim = 16
+latent_dim = (None, 16)
 beta = 10.0
 
 epochs = 3
 
-encoder = build_encoder(input_dim, latent_dim)
-decoder = build_decoder(latent_dim, output_dim)
+encoder = build_encoder((None, input_dim), latent_dim)
+decoder = build_decoder(latent_dim, (None, output_dim))
 
 vae = BetaVAE(encoder, decoder, beta=beta)
 
 vae.compile(optimizer=keras.optimizers.Adam(learning_rate=1e-4))
 
-vae.build(input_shape=(None,505))
+vae.build(input_shape=(None, input_dim))
 
 print(vae.summary())
 
