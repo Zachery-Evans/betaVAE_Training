@@ -226,15 +226,14 @@ interpDataFramelist=[]
 # Interpolate the spectra to increase the accuracy of the model
 for index, row in rawTrainingDataframe.iterrows():
     #print(index)
-    row = row[last_nonwavenum_idx:].fillna(0.0)
+    row = row[last_nonwavenum_idx:]
 
     frequencies = row.index.to_numpy()
     frequencies = frequencies[::-1]  # Reverse the order for interpolation
     spectrum = row.to_numpy()
     spectrum = spectrum[::-1]  # Reverse the order for interpolation
-
+    
     interpolated_wavenumber, interpolated_spectrum = sp.interpolate_spectrum(frequencies, spectrum, low=900, high=1400)
-
     baseline1 = sp.airpls(interpolated_spectrum)
     corrected1 = interpolated_spectrum - baseline1
 
@@ -247,8 +246,8 @@ for index, row in rawTrainingDataframe.iterrows():
     fingerprint_cm = interpolated_wavenumber
     fingerprint_abs = corrected3
 
-    #apply the interpolation to the spectral window
-    interpolated_wavenumber, interpolated_absorbance = sp.interpolate_spectrum(f, a, 1500, 1800)
+    #apply the interpolation to the characteristic spectral window
+    interpolated_wavenumber, interpolated_absorbance = sp.interpolate_spectrum(frequencies, spectrum, 1500, 1800)
     #calculate the baseline
     baseline1 = sp.airpls(interpolated_absorbance)
 
@@ -264,13 +263,7 @@ for index, row in rawTrainingDataframe.iterrows():
     frequencies = np.concatenate((fingerprint_cm, carbonyl_cm))
     spectrum = np.concatenate((fingerprint_abs, carbonyl_abs))
 
-    frequencies = row.index.to_numpy()
-    frequencies = frequencies[::-1]  # Reverse the order for interpolation
-    spectrum = row.to_numpy()
-    spectrum = spectrum[::-1]  # Reverse the order for interpolation
-    interpolated_wavenumber, interpolated_spectrum = sp.interpolate_spectrum(frequencies, spectrum, low=900, high=1800)
-    #interpRawTrainingDataframe = pd.concat([interpRawTrainingDataframe, pd.DataFrame(interpolated_spectrum, columns=interpolated_wavenumber)], ignore_index=True)
-    interpDataFramelist.append(pd.DataFrame([interpolated_spectrum], columns=interpolated_wavenumber))
+    interpDataFramelist.append(pd.DataFrame(data=[spectrum], columns=frequencies))
 
 interpRawTrainingDataframe = pd.concat(interpDataFramelist, ignore_index=True)
 interpDataFramelist = None # Clear memory
@@ -296,18 +289,18 @@ rawTrainingDataframe["fold"] = rawTrainingDataframe["Sample Name"].map(fold_map)
 """
 Initialize the model, train the model and save. 
 """
-wavenumbers = sorted(wavenumbers)
-betaVAE_trainingData = rawTrainingDataframe[wavenumbers]
+wavenumbers = sorted(frequencies)
+betaVAE_trainingData = interpRawTrainingDataframe[wavenumbers]
 input_dim = len(wavenumbers)
 output_dim = input_dim
-
-latent_dim = (None, 16)
+print(input_dim)
+latent_dim = 16
 beta = 10.0
 
 epochs = 3
 
-encoder = build_encoder((None, input_dim), latent_dim)
-decoder = build_decoder(latent_dim, (None, output_dim))
+encoder = build_encoder(input_dim, latent_dim)
+decoder = build_decoder(latent_dim, output_dim)
 
 vae = BetaVAE(encoder, decoder, beta=beta)
 
