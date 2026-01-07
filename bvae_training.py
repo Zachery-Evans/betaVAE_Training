@@ -2,8 +2,7 @@ import os
 import re
 import pandas as pd
 import numpy as np
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
-#os.environ["TF_USE_LEGACY_KERAS"] = "1"
+#os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 import tensorflow as tf
 import keras
 from keras import Model
@@ -222,10 +221,10 @@ masked_trainingDataframeList = None # Clear memory
 
 interpRawTrainingDataframe = pd.DataFrame()
 interpDataFramelist=[]
-
+print("Preprocessing and interpolating the training data...")
 # Interpolate the spectra to increase the accuracy of the model
 for index, row in rawTrainingDataframe.iterrows():
-    #print(index)
+    print(index)
     row = row[last_nonwavenum_idx:]
 
     frequencies = row.index.to_numpy()
@@ -293,7 +292,7 @@ wavenumbers = sorted(frequencies)
 betaVAE_trainingData = interpRawTrainingDataframe[wavenumbers]
 input_dim = len(wavenumbers)
 output_dim = input_dim
-print(input_dim)
+
 latent_dim = 16
 beta = 10.0
 
