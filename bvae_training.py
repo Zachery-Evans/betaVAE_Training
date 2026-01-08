@@ -4,7 +4,9 @@ import pandas as pd
 import numpy as np
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = "2"
 os.environ['TF_ENABLE_ONEDNN_OPTS'] = "0"
+os.environ['KERAS BACKEND'] = 'tensorflow'
 import tensorflow as tf
+tf.config.run_functions_eagerly(True)
 import keras
 from keras import layers
 from scipy.stats import gaussian_kde
@@ -64,25 +66,27 @@ def distribution_Selection(df, distributionIdx, numberOfSigmas):
 Build the Encoder
 """
 def build_encoder(input_dim, latent_dim): 
-
-    inputs = keras.Input(shape=(input_dim)) 
+    inputs = keras.Input(shape=input_dim) 
     x = layers.Dense(128, activation="relu")(inputs) 
     x = layers.Dense(128, activation='relu')(x) 
     z_mean = layers.Dense(latent_dim, name="z_mean")(x) 
     z_logvar = layers.Dense(latent_dim, name="z_logvar")(x) 
     z = Sampling()([z_mean, z_logvar])
-    return keras.Model(inputs, [z_mean, z_logvar, z], name="encoder")
+    encoder = keras.Model(inputs, [z_mean, z_logvar, z], name="encoder")
+    print(encoder.summary())
+    return encoder
 
 """
 Build the Decoder 
 """
 def build_decoder(latent_dim, output_dim):
-    latent_inputs = keras.Input(shape=(latent_dim))
+    latent_inputs = keras.Input(shape=latent_dim)
     x = layers.Dense(128, activation="relu")(latent_inputs)
     x = layers.Dense(128, activation='relu')(x)
     outputs = layers.Dense(output_dim, activation="linear")(x)
-
-    return keras.Model(latent_inputs, outputs, name="decoder")
+    decoder = keras.Model(latent_inputs, outputs, name="decoder")
+    print(decoder.summary())
+    return decoder
 
 
 """
@@ -90,20 +94,15 @@ Reparameterization
 
 """
 class Sampling(keras.layers.Layer):
+    """Uses (z_mean, z_log_var) to sample z, the vector encoding a digit."""
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.seed_generator = tf.random.set_seed(1337)
-
-    def call(self, inputs):
-        z_mean, z_log_var = inputs
-        batch = tf.shape(z_mean)[0]
-        dim = tf.shape(z_mean)[1]
-        epsilon = tf.random.normal(shape=(batch, dim), seed=self.seed_generator)
-        return z_mean + tf.exp(0.5 * z_log_var) * epsilon
+    
 
 """
-Subclass of BetaVAE
+BetaVAE Model
 
 """
 class BetaVAE(keras.Model):
@@ -112,21 +111,12 @@ class BetaVAE(keras.Model):
         self.encoder = encoder
         self.decoder = decoder
         self.beta = beta
-        self.sampling = Sampling()
+        #self.sampling = Sampling()
+        self.seed_generator = tf.random.set_seed(1337)
 
         self.total_loss_tracker = keras.metrics.Mean(name="loss")
         self.recon_loss_tracker = keras.metrics.Mean(name="recon_loss")
         self.kl_loss_tracker = keras.metrics.Mean(name="kl_loss")
-
-    """
-    def call(self, inputs, training=True):
-        z_mean, z_log_var = self.encoder(inputs)
-        z = self.sampling([z_mean, z_log_var])
-        return self.decoder(z)
-    """
-
-    def call(self, inputs, training=True):
-        return self.sampling.call(self, inputs)
 
     @property
     def metrics(self):
@@ -136,12 +126,13 @@ class BetaVAE(keras.Model):
             self.kl_loss_tracker,
         ]
     
-    def get_config(self):
-        config = super().get_config()
-        config.update({
-            "beta": self.beta,
-        })
-        return config
+    def call(self, inputs):
+
+        z_mean, z_log_var = inputs
+        batch = tf.shape(z_mean)[0]
+        dim = tf.shape(z_mean)[1]
+        epsilon = tf.random.normal(shape=(batch, dim), seed=self.seed_generator)
+        return z_mean + tf.exp(0.5 * z_log_var) * epsilon
     
     """
     The training of the Model, here we have the minimization of the loss function and define the loss
@@ -153,24 +144,26 @@ class BetaVAE(keras.Model):
             data = data[0]
 
         with tf.GradientTape() as tape:
-            reconstruction = self(data, training=True) 
+            z_mean, z_logvar, z = self.encoder(data)
 
-            z_mean, z_logvar = self.encoder(data, training=True)
+            reconstruction = self.decoder(z)
             
-            recon_loss = tf.reduce_mean(
-                tf.reduce_sum(
+            recon_loss = tf.keras.ops.mean(
+                tf.keras.ops.sum(
                     keras.losses.binary_crossentropy(data, reconstruction),
                 )
             )
 
-            kl_loss = -0.5 * tf.reduce_mean(
-                tf.reduce_sum(1 + z_logvar - tf.square(z_mean) - tf.exp(z_logvar), axis=1)
+            kl_loss = -0.5 * tf.keras.ops.mean(
+                tf.keras.ops.sum(1 + z_logvar - tf.square(z_mean) - tf.exp(z_logvar), axis=1)
             )
 
             total_loss = recon_loss + self.beta * kl_loss
 
         grads = tape.gradient(total_loss, self.trainable_weights)
         self.optimizer.apply_gradients(zip(grads, self.trainable_weights))
+        self.recon_loss_tracker.update_state(recon_loss)
+        self.kl_loss_tracker.update_state(kl_loss)
 
         return {
             "loss": total_loss,
@@ -195,6 +188,11 @@ trainingFiles = sorted(trainingFiles, key=lambda x: int(re.search(r'(?<= )(.+?)(
 # Read all of the data and place the dataframes into a list
 trainingDataframeList = [pd.read_csv(path+file, low_memory=False, skiprows=[1,2]) for file in trainingFiles]
 
+testingModelFlag = True
+if testingModelFlag:
+    for i, dataframe in enumerate(trainingDataframeList):
+        trainingDataframeList[i] = dataframe.sample(n=1000, random_state=42).reset_index(drop=True)  
+
 test_df = trainingDataframeList[0]
 test_df = roundWavenumbers(test_df)
 
@@ -203,7 +201,7 @@ wavenumbers = test_df.columns[last_nonwavenum_idx:]
 
 masked_trainingDataframeList = []
 
-stdDevs = 3
+stdDevs = 2
 
 for df in trainingDataframeList:
     selected_indexes, discarded_indexes, mask_selected, modePosition, areaPE = distribution_Selection(df, '1981.7 - 2095.8', stdDevs)
@@ -313,16 +311,16 @@ vae = BetaVAE(encoder, decoder, beta=beta)
 
 vae.compile(optimizer=keras.optimizers.Adam(learning_rate=1e-4))
 
-vae.build(input_shape=(input_dim,))
-
-print(vae.summary())
-
-print(vae.get_config())
+#vae.build(input_shape=(None, input_dim))
 
 #for array in betaVAE_trainingData.values:
     #print([wavenumbers, array])
 array = np.asarray(betaVAE_trainingData.values, dtype='float32')
+
 #array = array[None,:]
+_ = vae(array[0])
+print(vae.summary())
+
 vae.fit(array, epochs=epochs, batch_size=128)
 
 tf.saved_model.save(vae, "./new_vae/")
