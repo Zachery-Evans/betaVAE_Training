@@ -2,10 +2,10 @@ import os
 import re
 import pandas as pd
 import numpy as np
-#os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = "2"
+os.environ['TF_ENABLE_ONEDNN_OPTS'] = "0"
 import tensorflow as tf
 import keras
-from keras import Model
 from keras import layers
 from scipy.stats import gaussian_kde
 from sklearn.model_selection import cross_val_score, KFold
@@ -65,22 +65,23 @@ Build the Encoder
 """
 def build_encoder(input_dim, latent_dim): 
 
-    inputs = keras.Input(shape=input_dim) 
+    inputs = keras.Input(shape=(input_dim)) 
     x = layers.Dense(128, activation="relu")(inputs) 
     x = layers.Dense(128, activation='relu')(x) 
     z_mean = layers.Dense(latent_dim, name="z_mean")(x) 
     z_logvar = layers.Dense(latent_dim, name="z_logvar")(x) 
-
-    return keras.Model(inputs, [z_mean, z_logvar], name="encoder")
+    z = Sampling()([z_mean, z_logvar])
+    return keras.Model(inputs, [z_mean, z_logvar, z], name="encoder")
 
 """
 Build the Decoder 
 """
 def build_decoder(latent_dim, output_dim):
-    latent_inputs = keras.Input(shape=latent_dim)
+    latent_inputs = keras.Input(shape=(latent_dim))
     x = layers.Dense(128, activation="relu")(latent_inputs)
     x = layers.Dense(128, activation='relu')(x)
     outputs = layers.Dense(output_dim, activation="linear")(x)
+
     return keras.Model(latent_inputs, outputs, name="decoder")
 
 
@@ -89,9 +90,16 @@ Reparameterization
 
 """
 class Sampling(keras.layers.Layer):
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.seed_generator = tf.random.set_seed(1337)
+
     def call(self, inputs):
         z_mean, z_log_var = inputs
-        epsilon = tf.random.normal(shape=tf.shape(z_mean))
+        batch = tf.shape(z_mean)[0]
+        dim = tf.shape(z_mean)[1]
+        epsilon = tf.random.normal(shape=(batch, dim), seed=self.seed_generator)
         return z_mean + tf.exp(0.5 * z_log_var) * epsilon
 
 """
@@ -110,10 +118,15 @@ class BetaVAE(keras.Model):
         self.recon_loss_tracker = keras.metrics.Mean(name="recon_loss")
         self.kl_loss_tracker = keras.metrics.Mean(name="kl_loss")
 
-    def call(self, inputs, training=False):
+    """
+    def call(self, inputs, training=True):
         z_mean, z_log_var = self.encoder(inputs)
         z = self.sampling([z_mean, z_log_var])
         return self.decoder(z)
+    """
+
+    def call(self, inputs, training=True):
+        return self.sampling.call(self, inputs)
 
     @property
     def metrics(self):
@@ -129,13 +142,6 @@ class BetaVAE(keras.Model):
             "beta": self.beta,
         })
         return config
-    
-    @classmethod
-    def from_config(cls, config):
-        # You MUST recreate encoder and decoder here
-        encoder = build_encoder(input_dim=505, latent_dim=16)
-        decoder = build_decoder(latent_dim=16, output_dim=505)
-        return cls(encoder=encoder, decoder=decoder, **config)
     
     """
     The training of the Model, here we have the minimization of the loss function and define the loss
@@ -182,7 +188,7 @@ path = './training_data/'
 #List all of the files in the data directory.
 allFiles = os.listdir(path)
 # Take only the files that contain data pertaining to SMP65#010 
-trainingFiles = [file for file in allFiles if file.endswith('.csv') and 'SMP65' in file and 'full width' not in file]
+trainingFiles = [file for file in allFiles if file.endswith('.csv') and 'SMP65#010 70d 820um' in file and 'full width' not in file]
 
 trainingFiles = sorted(trainingFiles, key=lambda x: int(re.search(r'(?<= )(.+?)(?=d)', x).group()))
 
@@ -224,7 +230,7 @@ interpDataFramelist=[]
 print("Preprocessing and interpolating the training data...")
 # Interpolate the spectra to increase the accuracy of the model
 for index, row in rawTrainingDataframe.iterrows():
-    print(index)
+
     row = row[last_nonwavenum_idx:]
 
     frequencies = row.index.to_numpy()
@@ -293,6 +299,8 @@ betaVAE_trainingData = interpRawTrainingDataframe[wavenumbers]
 input_dim = len(wavenumbers)
 output_dim = input_dim
 
+batch=128
+
 latent_dim = 16
 beta = 10.0
 
@@ -305,7 +313,7 @@ vae = BetaVAE(encoder, decoder, beta=beta)
 
 vae.compile(optimizer=keras.optimizers.Adam(learning_rate=1e-4))
 
-vae.build(input_shape=(None, input_dim))
+vae.build(input_shape=(input_dim,))
 
 print(vae.summary())
 
