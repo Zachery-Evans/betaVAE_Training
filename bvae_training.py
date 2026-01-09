@@ -2,7 +2,7 @@ import os
 import re
 import pandas as pd
 import numpy as np
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = "2"
+#os.environ['TF_CPP_MIN_LOG_LEVEL'] = "2"
 os.environ['TF_ENABLE_ONEDNN_OPTS'] = "0"
 os.environ['KERAS BACKEND'] = 'tensorflow'
 import tensorflow as tf
@@ -66,13 +66,13 @@ def distribution_Selection(df, distributionIdx, numberOfSigmas):
 Build the Encoder
 """
 def build_encoder(input_dim, latent_dim): 
-    inputs = keras.Input(shape=input_dim) 
-    x = layers.Dense(128, activation="relu")(inputs) 
+    input = keras.Input(shape=input_dim) 
+    x = layers.Dense(128, activation="relu")(input) 
     x = layers.Dense(128, activation='relu')(x) 
     z_mean = layers.Dense(latent_dim, name="z_mean")(x) 
     z_logvar = layers.Dense(latent_dim, name="z_logvar")(x) 
     z = Sampling()([z_mean, z_logvar])
-    encoder = keras.Model(inputs, [z_mean, z_logvar, z], name="encoder")
+    encoder = keras.Model(inputs=input, outputs=[z_mean, z_logvar, z], name="encoder")
     print(encoder.summary())
     return encoder
 
@@ -80,7 +80,7 @@ def build_encoder(input_dim, latent_dim):
 Build the Decoder 
 """
 def build_decoder(latent_dim, output_dim):
-    latent_inputs = keras.Input(shape=latent_dim)
+    latent_inputs = keras.Input(shape= latent_dim)
     x = layers.Dense(128, activation="relu")(latent_inputs)
     x = layers.Dense(128, activation='relu')(x)
     outputs = layers.Dense(output_dim, activation="linear")(x)
@@ -311,15 +311,11 @@ vae = BetaVAE(encoder, decoder, beta=beta)
 
 vae.compile(optimizer=keras.optimizers.Adam(learning_rate=1e-4))
 
-#vae.build(input_shape=(None, input_dim))
+array = np.asarray(betaVAE_trainingData.values, dtype=np.float32)
 
-#for array in betaVAE_trainingData.values:
-    #print([wavenumbers, array])
-array = np.asarray(betaVAE_trainingData.values, dtype='float32')
+vae.build((batch, input_dim))
 
-#array = array[None,:]
-_ = vae(array[0])
-print(vae.summary())
+keras.utils.plot_model(vae, to_file='vae_model.png',show_shapes=True)
 
 vae.fit(array, epochs=epochs, batch_size=128)
 
