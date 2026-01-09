@@ -6,7 +6,6 @@ import numpy as np
 os.environ['TF_ENABLE_ONEDNN_OPTS'] = "0"
 os.environ['KERAS BACKEND'] = 'tensorflow'
 import tensorflow as tf
-tf.config.run_functions_eagerly(True)
 import keras
 from keras import layers
 from scipy.stats import gaussian_kde
@@ -201,7 +200,7 @@ trainingFiles = sorted(trainingFiles, key=lambda x: int(re.search(r'(?<= )(.+?)(
 # Read all of the data and place the dataframes into a list
 trainingDataframeList = [pd.read_csv(path+file, low_memory=False, skiprows=[1,2]) for file in trainingFiles]
 
-testingModelFlag = True
+testingModelFlag = False
 if testingModelFlag:
     for i, dataframe in enumerate(trainingDataframeList):
         trainingDataframeList[i] = dataframe.sample(n=1000, random_state=42).reset_index(drop=True)  
@@ -324,7 +323,7 @@ vae = BetaVAE(encoder, decoder, beta=beta)
 
 vae.compile(optimizer=keras.optimizers.Adam(learning_rate=1e-4))
 
-vae.build(input_shape=(None, input_dim))
+#vae.build(input_shape=(None, input_dim))
 
 array = np.asarray(betaVAE_trainingData.values, dtype=np.float32)
 vae.fit(array, epochs=epochs, batch_size=128)
