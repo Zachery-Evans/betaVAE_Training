@@ -193,7 +193,7 @@ path = './training_data/'
 #List all of the files in the data directory.
 allFiles = os.listdir(path)
 # Take only the files that contain data pertaining to SMP65#010 
-trainingFiles = [file for file in allFiles if file.endswith('.csv') and 'SMP65#010 70d 820um' in file and 'full width' not in file]
+trainingFiles = [file for file in allFiles if file.endswith('.csv') and 'SMP65#010' in file and 'full width' not in file]
 
 trainingFiles = sorted(trainingFiles, key=lambda x: int(re.search(r'(?<= )(.+?)(?=d)', x).group()))
 
@@ -314,7 +314,7 @@ batch=128
 latent_dim = 8
 beta = 10.0
 
-epochs = 3
+epochs = 100
 
 encoder = build_encoder(input_dim, latent_dim)
 decoder = build_decoder(latent_dim, output_dim)
