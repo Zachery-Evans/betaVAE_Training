@@ -124,6 +124,14 @@ class BetaVAE(keras.Model):
         self.recon_loss_tracker = keras.metrics.Mean(name="recon_loss")
         self.kl_loss_tracker = keras.metrics.Mean(name="kl_loss")
 
+    def call(self, inputs):
+        z_mean, z_logvar = inputs
+        batch = z_mean
+        dim = z_logvar
+        epsilon = tf.random.normal(shape=(batch, dim), seed=self.seed_generator)
+        return z_mean + tf.exp(0.5 * z_logvar) * epsilon
+    
+
     @property
     def metrics(self):
         return [
@@ -132,10 +140,18 @@ class BetaVAE(keras.Model):
             self.kl_loss_tracker,
         ]
     
+    def get_config(self):
+        config = super().get_config()
+        config.update({
+            "beta": self.beta,
+        })
+        return config
+
     """
     The training of the Model, here we have the minimization of the loss function and define the loss
     function of the beta VAE to include the beta normalization term.
     """
+    @tf.function
     def train_step(self, data):
         
         if isinstance(data, tuple):
@@ -145,13 +161,13 @@ class BetaVAE(keras.Model):
             z_mean, z_logvar, z = self.encoder(data)
 
             reconstruction = self.decoder(z)
-            
-            recon_loss = tf.raw_ops.Mean(
-                input = tf.raw_ops.Sum(input=keras.losses.binary_crossentropy(data, reconstruction), axis=0), keep_dims=True
+
+            recon_loss = tf.reduce_mean(
+                tf.reduce_sum(keras.losses.binary_crossentropy(data, reconstruction))
             )
 
-            kl_loss = -0.5 * tf.raw_ops.Mean(
-                input = tf.raw_ops.Sum(input = 1 + z_logvar - tf.square(z_mean) - tf.exp(z_logvar), axis=1), keep_dims=True
+            kl_loss = -0.5 * tf.reduce_mean(
+                tf.reduce_sum(1 + z_logvar - tf.square(z_mean) - tf.exp(z_logvar))
             )
 
             total_loss = recon_loss + self.beta * kl_loss
@@ -166,6 +182,8 @@ class BetaVAE(keras.Model):
             "reconstruction_loss": recon_loss,
             "kl_loss": kl_loss,
         }
+
+
 
 
 
@@ -307,9 +325,11 @@ vae = BetaVAE(encoder, decoder, beta=beta)
 
 vae.compile(optimizer=keras.optimizers.Adam(learning_rate=1e-4))
 
+vae.build(input_shape=(None, input_dim))
+
 array = np.asarray(betaVAE_trainingData.values, dtype=np.float32)
 vae.fit(array, epochs=epochs, batch_size=128)
-
+_
 keras.utils.plot_model(vae, to_file='vae_model.png',show_shapes=True)
 
 tf.saved_model.save(vae, "./new_vae/")
