@@ -66,7 +66,7 @@ def distribution_Selection(df, distributionIdx, numberOfSigmas):
 Build the Encoder
 """
 def build_encoder(input_dim, latent_dim): 
-    input = keras.Input(shape=input_dim) 
+    input = keras.Input(shape=(input_dim,), name="spectra input") 
     x = layers.Dense(128, activation="relu")(input) 
     x = layers.Dense(128, activation='relu')(x) 
     z_mean = layers.Dense(latent_dim, name="z_mean")(x) 
@@ -80,7 +80,7 @@ def build_encoder(input_dim, latent_dim):
 Build the Decoder 
 """
 def build_decoder(latent_dim, output_dim):
-    latent_inputs = keras.Input(shape= latent_dim)
+    latent_inputs = keras.Input(shape=(latent_dim,), name="latent variables")
     x = layers.Dense(128, activation="relu")(latent_inputs)
     x = layers.Dense(128, activation='relu')(x)
     outputs = layers.Dense(output_dim, activation="linear")(x)
@@ -99,6 +99,13 @@ class Sampling(keras.layers.Layer):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.seed_generator = tf.random.set_seed(1337)
+
+    def call(self, inputs):
+        z_mean, z_log_var = inputs
+        batch = tf.shape(z_mean)[0]
+        dim = tf.shape(z_mean)[1]
+        epsilon = tf.random.normal(shape=(batch, dim), seed=self.seed_generator)
+        return z_mean + tf.exp(0.5 * z_log_var) * epsilon
     
 
 """
@@ -111,7 +118,6 @@ class BetaVAE(keras.Model):
         self.encoder = encoder
         self.decoder = decoder
         self.beta = beta
-        #self.sampling = Sampling()
         self.seed_generator = tf.random.set_seed(1337)
 
         self.total_loss_tracker = keras.metrics.Mean(name="loss")
@@ -125,14 +131,6 @@ class BetaVAE(keras.Model):
             self.recon_loss_tracker,
             self.kl_loss_tracker,
         ]
-    
-    def call(self, inputs):
-
-        z_mean, z_log_var = inputs
-        batch = tf.shape(z_mean)[0]
-        dim = tf.shape(z_mean)[1]
-        epsilon = tf.random.normal(shape=(batch, dim), seed=self.seed_generator)
-        return z_mean + tf.exp(0.5 * z_log_var) * epsilon
     
     """
     The training of the Model, here we have the minimization of the loss function and define the loss
@@ -148,14 +146,12 @@ class BetaVAE(keras.Model):
 
             reconstruction = self.decoder(z)
             
-            recon_loss = tf.keras.ops.mean(
-                tf.keras.ops.sum(
-                    keras.losses.binary_crossentropy(data, reconstruction),
-                )
+            recon_loss = tf.raw_ops.Mean(
+                input = tf.raw_ops.Sum(input=keras.losses.binary_crossentropy(data, reconstruction), axis=0), keep_dims=True
             )
 
-            kl_loss = -0.5 * tf.keras.ops.mean(
-                tf.keras.ops.sum(1 + z_logvar - tf.square(z_mean) - tf.exp(z_logvar), axis=1)
+            kl_loss = -0.5 * tf.raw_ops.Mean(
+                input = tf.raw_ops.Sum(input = 1 + z_logvar - tf.square(z_mean) - tf.exp(z_logvar), axis=1), keep_dims=True
             )
 
             total_loss = recon_loss + self.beta * kl_loss
@@ -299,7 +295,7 @@ output_dim = input_dim
 
 batch=128
 
-latent_dim = 16
+latent_dim = 8
 beta = 10.0
 
 epochs = 3
@@ -312,12 +308,9 @@ vae = BetaVAE(encoder, decoder, beta=beta)
 vae.compile(optimizer=keras.optimizers.Adam(learning_rate=1e-4))
 
 array = np.asarray(betaVAE_trainingData.values, dtype=np.float32)
-
-vae.build((batch, input_dim))
+vae.fit(array, epochs=epochs, batch_size=128)
 
 keras.utils.plot_model(vae, to_file='vae_model.png',show_shapes=True)
-
-vae.fit(array, epochs=epochs, batch_size=128)
 
 tf.saved_model.save(vae, "./new_vae/")
 tf.saved_model.save(encoder, './new_encoder/')
