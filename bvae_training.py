@@ -1,17 +1,14 @@
 import os
+os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
+os.environ["KERAS BACKEND"] = "tensorflow"
 import re
 import pandas as pd
 import numpy as np
-#os.environ['TF_CPP_MIN_LOG_LEVEL'] = "2"
-os.environ['TF_ENABLE_ONEDNN_OPTS'] = "0"
-os.environ['KERAS BACKEND'] = 'tensorflow'
 import tensorflow as tf
 import keras
 from keras import layers
 from scipy.stats import gaussian_kde
 from sklearn.model_selection import cross_val_score, KFold
-import random
-#from spectrum_preprocessing import interpolate_spectrum
 import spectrum_preprocessing as sp
 
 def roundWavenumbers(dataframe):
@@ -62,34 +59,6 @@ def distribution_Selection(df, distributionIdx, numberOfSigmas):
     return selected_indexes, discarded_indexes, mask_selected, modePosition, area
 
 """
-Build the Encoder
-"""
-def build_encoder(input_dim, latent_dim): 
-    input = keras.Input(shape=(input_dim,), name="spectra_input") 
-    x = layers.Dense(128, activation="relu")(input) 
-    x = layers.Dense(128, activation='relu')(x) 
-    z_mean = layers.Dense(latent_dim, name="z_mean")(x) 
-    z_logvar = layers.Dense(latent_dim, name="z_logvar")(x) 
-    z = Sampling()([z_mean, z_logvar])
-    encoder = keras.Model(inputs=[input], outputs=[z_mean, z_logvar, z], name="encoder")
-    print(encoder.summary())
-
-    return encoder
-
-"""
-Build the Decoder 
-"""
-def build_decoder(latent_dim, output_dim):
-    latent_inputs = keras.Input(shape=(latent_dim,), name="latent_variables")
-    x = layers.Dense(128, activation="relu")(latent_inputs)
-    x = layers.Dense(128, activation='relu')(x)
-    outputs = layers.Dense(output_dim, activation="linear")(x)
-    decoder = keras.Model([latent_inputs], outputs, name="decoder")
-    print(decoder.summary())
-    return decoder
-
-
-"""
 Reparameterization 
 
 """
@@ -101,11 +70,18 @@ class Sampling(keras.layers.Layer):
         self.seed_generator = tf.random.set_seed(1337)
 
     def call(self, inputs):
+
         z_mean, z_log_var = inputs
         batch = tf.shape(z_mean)[0]
         dim = tf.shape(z_mean)[1]
-        epsilon = tf.random.normal(shape=(batch, dim), seed=self.seed_generator)
-        return z_mean + tf.exp(0.5 * z_log_var) * epsilon
+
+        epsilon = keras.backend.random_normal(
+            shape=(batch, dim),
+            seed=self.seed_generator
+        )
+
+        return z_mean + keras.backend.exp(0.5 * z_log_var) * epsilon
+
     
 
 """
@@ -120,17 +96,37 @@ class BetaVAE(keras.Model):
         self.beta = beta
         self.seed_generator = tf.random.set_seed(1337)
 
+        self.sampling = Sampling()
+
         self.total_loss_tracker = keras.metrics.Mean(name="loss")
         self.recon_loss_tracker = keras.metrics.Mean(name="recon_loss")
         self.kl_loss_tracker = keras.metrics.Mean(name="kl_loss")
-
-    def call(self, inputs):
-        z_mean, z_logvar = inputs
-        batch = z_mean
-        dim = z_logvar
-        epsilon = tf.random.normal(shape=(batch, dim), seed=self.seed_generator)
-        return z_mean + tf.exp(0.5 * z_logvar) * epsilon
     
+    
+    def call(self, inputs):
+        # Forward pass
+        x = self.encoder(inputs)
+        z_mean, z_log_var = tf.split(x, num_or_size_splits=2)
+        z = self.sampling([z_mean, z_log_var])
+        reconstructed = self.decoder(z)
+
+        # Compute KL divergence
+        kl_loss = -0.5 * tf.reduce_mean(
+            tf.reduce_sum(1 + z_log_var - tf.square(z_mean) - tf.exp(z_log_var), axis=1)
+        )
+
+        # Compute reconstruction loss (binary crossentropy)
+        reconstruction_loss = tf.reduce_mean(
+            tf.reduce_sum(
+                keras.losses.binary_crossentropy(inputs, reconstructed), axis=(1, 2)
+            )
+        )
+
+        # Total loss with beta scaling
+        total_loss = reconstruction_loss + self.beta * kl_loss
+        self.add_loss(total_loss)
+
+        return reconstructed
 
     @property
     def metrics(self):
@@ -172,10 +168,10 @@ class BetaVAE(keras.Model):
 
             total_loss = recon_loss + self.beta * kl_loss
 
-        grads = tape.gradient(total_loss, self.trainable_weights)
-        self.optimizer.apply_gradients(zip(grads, self.trainable_weights))
-        self.recon_loss_tracker.update_state(recon_loss)
-        self.kl_loss_tracker.update_state(kl_loss)
+            grads = tape.gradient(total_loss, self.trainable_weights)
+            self.optimizer.apply_gradients(zip(grads, self.trainable_weights))
+            self.recon_loss_tracker.update_state(recon_loss)
+            self.kl_loss_tracker.update_state(kl_loss)
 
         return {
             "loss": total_loss,
@@ -193,14 +189,14 @@ path = './training_data/'
 #List all of the files in the data directory.
 allFiles = os.listdir(path)
 # Take only the files that contain data pertaining to SMP65#010 
-trainingFiles = [file for file in allFiles if file.endswith('.csv') and 'SMP65#010' in file and 'full width' not in file]
+trainingFiles = [file for file in allFiles if file.endswith('.csv') and 'SMP65#010 70d' in file and 'full width' not in file]
 
 trainingFiles = sorted(trainingFiles, key=lambda x: int(re.search(r'(?<= )(.+?)(?=d)', x).group()))
 
 # Read all of the data and place the dataframes into a list
 trainingDataframeList = [pd.read_csv(path+file, low_memory=False, skiprows=[1,2]) for file in trainingFiles]
 
-testingModelFlag = False
+testingModelFlag = True
 if testingModelFlag:
     for i, dataframe in enumerate(trainingDataframeList):
         trainingDataframeList[i] = dataframe.sample(n=1000, random_state=42).reset_index(drop=True)  
@@ -283,7 +279,7 @@ for index, row in rawTrainingDataframe.iterrows():
 interpRawTrainingDataframe = pd.concat(interpDataFramelist, ignore_index=True)
 interpDataFramelist = None # Clear memory
 
-print(interpRawTrainingDataframe)
+#print(interpRawTrainingDataframe)
 
 """
 K-fold Validation
@@ -311,29 +307,51 @@ output_dim = input_dim
 
 batch=128
 
-latent_dim = 8
+latent_dim = 16
 beta = 10.0
 
 epochs = 100
 
-encoder = build_encoder(input_dim, latent_dim)
-decoder = build_decoder(latent_dim, output_dim)
+"""
+Build the Encoder
+"""
+
+input = keras.Input(shape=input_dim, name='spectra_input') 
+x = layers.Dense(batch, activation='relu')(input) 
+x = layers.Dense(batch, activation='relu')(x) 
+z_mean = layers.Dense(latent_dim, name='z_mean')(x) 
+z_logvar = layers.Dense(latent_dim, name='z_logvar')(x) 
+z = Sampling()([z_mean, z_logvar])
+encoder = keras.Model(inputs=input, outputs=[z_mean, z_logvar, z], name='encoder')
+encoder.summary()
+
+"""
+Build the Decoder 
+"""
+latent_inputs = keras.Input(shape=(latent_dim,), name='latent_variables')
+x = layers.Dense(128, activation='relu')(latent_inputs)
+outputs = layers.Dense(output_dim, activation='linear')(x)
+decoder = keras.Model([latent_inputs], outputs, name='decoder')
+decoder.summary()
 
 vae = BetaVAE(encoder, decoder, beta=beta)
 
 vae.compile(optimizer=keras.optimizers.Adam(learning_rate=1e-4))
 
-#vae.build(input_shape=(None, input_dim))
-
 array = np.asarray(betaVAE_trainingData.values, dtype=np.float32)
-vae.fit(array, epochs=epochs, batch_size=128)
 
-#keras.utils.plot_model(vae, to_file='vae_model.png',show_shapes=True)
+vae.build(input_shape=(None, input_dim))
+vae.fit(x=array, epochs=epochs, batch_size=batch)
 
-tf.saved_model.save(vae, "./new_vae/")
-tf.saved_model.save(encoder, './new_encoder/')
-tf.saved_model.save(decoder, './new_decoder/')
+vae.save("./new_vae_model/")
+encoder.save('./new_encoder_model/')
+decoder.save('./new_decoder_model/')
+#tf.saved_model.save(vae, "./new_vae/")
+#tf.saved_model.save(encoder, './new_encoder/')
+#tf.saved_model.save(decoder, './new_decoder/')
 
+saved_model = tf.saved_model.load("./new_encoder/")
+saved_model = tf.saved_model.load("./new_decoder/")
 saved_model = tf.saved_model.load("./new_vae/")
 
 print(saved_model.signatures)
