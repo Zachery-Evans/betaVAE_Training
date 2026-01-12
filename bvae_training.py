@@ -10,6 +10,7 @@ from keras import layers
 from scipy.stats import gaussian_kde
 from sklearn.model_selection import cross_val_score, KFold
 import spectrum_preprocessing as sp
+from bvae_model import pipeline
 
 def roundWavenumbers(dataframe):
     """
@@ -91,50 +92,38 @@ BetaVAE Model
 class BetaVAE(keras.Model):
     def __init__(self, encoder, decoder, beta, **kwargs):
         super().__init__(**kwargs)
-        self.encoder = encoder
+        self.encoder = encoder # ENCODER HAS THE SAMPLING LAYER INSIDE
         self.decoder = decoder
         self.beta = beta
         self.seed_generator = tf.random.set_seed(1337)
-
-        self.sampling = Sampling()
 
         self.total_loss_tracker = keras.metrics.Mean(name="loss")
         self.recon_loss_tracker = keras.metrics.Mean(name="recon_loss")
         self.kl_loss_tracker = keras.metrics.Mean(name="kl_loss")
     
-    
-    def call(self, inputs):
+    def call(self, data):
         # Forward pass
-        x = self.encoder(inputs)
-        z_mean, z_log_var = tf.split(x, num_or_size_splits=2)
-        z = self.sampling([z_mean, z_log_var])
-        reconstructed = self.decoder(z)
+        with tf.GradientTape() as tape:
+            x = self.encoder(data)
+            z_mean, z_logvar, z = tf.split(x, num_or_size_splits=3)
+            reconstruction = self.decoder(z)
 
-        # Compute KL divergence
-        kl_loss = -0.5 * tf.reduce_mean(
-            tf.reduce_sum(1 + z_log_var - tf.square(z_mean) - tf.exp(z_log_var), axis=1)
-        )
-
-        # Compute reconstruction loss (binary crossentropy)
-        reconstruction_loss = tf.reduce_mean(
-            tf.reduce_sum(
-                keras.losses.binary_crossentropy(inputs, reconstructed), axis=(1, 2)
+            recon_loss = tf.reduce_mean(
+                tf.reduce_sum(keras.losses.binary_crossentropy(data, reconstruction))
             )
-        )
 
-        # Total loss with beta scaling
-        total_loss = reconstruction_loss + self.beta * kl_loss
-        self.add_loss(total_loss)
+            kl_loss = -0.5 * tf.reduce_mean(
+                tf.reduce_sum(1 + z_logvar - tf.square(z_mean) - tf.exp(z_logvar))
+            )
 
-        return reconstructed
+            total_loss = recon_loss + self.beta * kl_loss
 
-    def call(self, inputs):
-        z_mean, z_logvar = inputs
-        batch = z_mean
-        dim = z_logvar
-        epsilon = tf.random.normal(shape=(batch, dim), seed=self.seed_generator)
-        return z_mean + tf.exp(0.5 * z_logvar) * epsilon
-    
+            grads = tape.gradient(total_loss, self.trainable_weights)
+            self.optimizer.apply_gradients(zip(grads, self.trainable_weights))
+            self.recon_loss_tracker.update_state(recon_loss)
+            self.kl_loss_tracker.update_state(kl_loss)
+
+        return recon_loss, kl_loss, total_loss
 
     @property
     def metrics(self):
@@ -161,35 +150,13 @@ class BetaVAE(keras.Model):
         if isinstance(data, tuple):
             data = data[0]
 
-        with tf.GradientTape() as tape:
-            z_mean, z_logvar, z = self.encoder(data)
-
-            reconstruction = self.decoder(z)
-
-            recon_loss = tf.reduce_mean(
-                tf.reduce_sum(keras.losses.binary_crossentropy(data, reconstruction))
-            )
-
-            kl_loss = -0.5 * tf.reduce_mean(
-                tf.reduce_sum(1 + z_logvar - tf.square(z_mean) - tf.exp(z_logvar))
-            )
-
-            total_loss = recon_loss + self.beta * kl_loss
-
-            grads = tape.gradient(total_loss, self.trainable_weights)
-            self.optimizer.apply_gradients(zip(grads, self.trainable_weights))
-            self.recon_loss_tracker.update_state(recon_loss)
-            self.kl_loss_tracker.update_state(kl_loss)
+        recon_loss, kl_loss, total_loss = self.call(data)
 
         return {
             "loss": total_loss,
             "reconstruction_loss": recon_loss,
             "kl_loss": kl_loss,
         }
-
-
-
-
 
 """
 Load and Format the data for k-fold validation of the beta-VAE model
@@ -254,35 +221,7 @@ for index, row in rawTrainingDataframe.iterrows():
     spectrum = row.to_numpy()
     spectrum = spectrum[::-1]  # Reverse the order for interpolation
     
-    interpolated_wavenumber, interpolated_spectrum = sp.interpolate_spectrum(frequencies, spectrum, low=900, high=1400)
-    baseline1 = sp.airpls(interpolated_spectrum)
-    corrected1 = interpolated_spectrum - baseline1
-
-    baseline2 = sp.polynomial_background(interpolated_wavenumber, corrected1, odr=2, s=0.006, fct='atq')[0]
-    corrected2 = corrected1 - baseline2
-
-    baseline3 = sp.rubberband_baseline(interpolated_wavenumber, corrected2)
-    corrected3 = corrected2 - baseline3
-
-    fingerprint_cm = interpolated_wavenumber
-    fingerprint_abs = corrected3
-
-    #apply the interpolation to the characteristic spectral window
-    interpolated_wavenumber, interpolated_absorbance = sp.interpolate_spectrum(frequencies, spectrum, 1500, 1800)
-    #calculate the baseline
-    baseline1 = sp.airpls(interpolated_absorbance)
-
-    #baseline correct the spectrum
-    corrected1 = interpolated_absorbance - baseline1
-
-    baseline2 = sp.rubberband_baseline(interpolated_wavenumber, corrected1)
-    corrected2 = corrected1 - baseline2
-
-    carbonyl_cm = interpolated_wavenumber
-    carbonyl_abs = corrected2
-
-    frequencies = np.concatenate((fingerprint_cm, carbonyl_cm))
-    spectrum = np.concatenate((fingerprint_abs, carbonyl_abs))
+    frequencies, spectrum = pipeline(frequencies, spectrum)
 
     interpDataFramelist.append(pd.DataFrame(data=[spectrum], columns=frequencies))
 
@@ -322,10 +261,11 @@ beta = 10.0
 
 epochs = 100
 
+array = np.asarray(betaVAE_trainingData.values, dtype=np.float32)
+
 """
 Build the Encoder
 """
-
 input = keras.Input(shape=input_dim, name='spectra_input') 
 x = layers.Dense(batch, activation='relu')(input) 
 x = layers.Dense(batch, activation='relu')(x) 
@@ -339,7 +279,7 @@ encoder.summary()
 Build the Decoder 
 """
 latent_inputs = keras.Input(shape=(latent_dim,), name='latent_variables')
-x = layers.Dense(128, activation='relu')(latent_inputs)
+x = layers.Dense(batch, activation='relu')(latent_inputs)
 outputs = layers.Dense(output_dim, activation='linear')(x)
 decoder = keras.Model([latent_inputs], outputs, name='decoder')
 decoder.summary()
@@ -348,19 +288,14 @@ vae = BetaVAE(encoder, decoder, beta=beta)
 
 vae.compile(optimizer=keras.optimizers.Adam(learning_rate=1e-4))
 
-vae.build(input_shape=(None, input_dim))
+test_input = tf.random.normal(shape=(latent_dim, 1))  # Create a test input with the correct shape
 
-array = np.asarray(betaVAE_trainingData.values, dtype=np.float32)
-
-vae.build(input_shape=(None, input_dim))
+vae(test_input)  # Build the model by calling it on a test input
 vae.fit(x=array, epochs=epochs, batch_size=batch)
 
-vae.save("./new_vae_model/")
-encoder.save('./new_encoder_model/')
-decoder.save('./new_decoder_model/')
-#tf.saved_model.save(vae, "./new_vae/")
-#tf.saved_model.save(encoder, './new_encoder/')
-#tf.saved_model.save(decoder, './new_decoder/')
+tf.saved_model.save(vae, "./new_vae/")
+tf.saved_model.save(encoder, './new_encoder/')
+tf.saved_model.save(decoder, './new_decoder/')
 
 saved_model = tf.saved_model.load("./new_encoder/")
 saved_model = tf.saved_model.load("./new_decoder/")
