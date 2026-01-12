@@ -301,7 +301,7 @@ saved_encoder = tf.saved_model.load("./new_encoder/")
 saved_decoder = tf.saved_model.load("./new_decoder/")
 saved_vae = tf.saved_model.load("./new_vae/")
 
-print(saved_vae.signatures)
+#print(saved_vae.signatures)
 
 if saved_vae is not None and saved_encoder is not None and saved_decoder is not None:
     print("All models loaded successfully!")

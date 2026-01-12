@@ -22,8 +22,8 @@ import spectrum_preprocessing as sp
 
 #load the saved encoder, and decoder
 
-loaded_decoder = tf.saved_model.load("./new_decoder_model")
-loaded_encoder = tf.saved_model.load("./new_encoder_model")
+loaded_decoder = tf.saved_model.load("./new_decoder")
+loaded_encoder = tf.saved_model.load("./new_encoder")
 
 
 def thickness_normalizer(spectrum_array, IntStd):
