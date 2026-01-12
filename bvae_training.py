@@ -288,7 +288,7 @@ vae = BetaVAE(encoder, decoder, beta=beta)
 
 vae.compile(optimizer=keras.optimizers.Adam(learning_rate=1e-4))
 
-test_input = tf.random.normal(shape=(latent_dim, 1))  # Create a test input with the correct shape
+test_input = tf.random.normal(shape=(latent_dim, input_dim))  # Create a test input with the correct shape
 
 vae(test_input)  # Build the model by calling it on a test input
 vae.fit(x=array, epochs=epochs, batch_size=batch)
@@ -297,14 +297,14 @@ tf.saved_model.save(vae, "./new_vae/")
 tf.saved_model.save(encoder, './new_encoder/')
 tf.saved_model.save(decoder, './new_decoder/')
 
-saved_model = tf.saved_model.load("./new_encoder/")
-saved_model = tf.saved_model.load("./new_decoder/")
-saved_model = tf.saved_model.load("./new_vae/")
+saved_encoder = tf.saved_model.load("./new_encoder/")
+saved_decoder = tf.saved_model.load("./new_decoder/")
+saved_vae = tf.saved_model.load("./new_vae/")
 
-print(saved_model.signatures)
+print(saved_vae.signatures)
 
-if saved_model is not None:
-    print("Model loaded successfully!")
+if saved_vae is not None and saved_encoder is not None and saved_decoder is not None:
+    print("All models loaded successfully!")
 
 else:
     print("Failed to load the model.")
