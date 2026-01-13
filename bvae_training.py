@@ -81,6 +81,16 @@ class Sampling(keras.layers.Layer):
             seed=self.seed_generator
         )
 
+        """
+        z_mean, z_log_var = args
+        set = tf.shape(z_mean)[0]
+        batch = tf.shape(z_mean)[1]
+        dim = tf.shape(z_mean)[-1]
+        # by default, random_normal has mean=0 and std=1.0
+        epsilon = tf.random.normal(shape=(set, dim))#tfp.distributions.Normal(mean=tf.zeros(shape=(batch, dim)),loc=tf.ones(shape=(batch, dim)))
+        return z_mean + (z_log_var * epsilon)
+        """
+
         return z_mean + keras.backend.exp(0.5 * z_log_var) * epsilon
 
     
@@ -166,7 +176,7 @@ path = './training_data/'
 #List all of the files in the data directory.
 allFiles = os.listdir(path)
 # Take only the files that contain data pertaining to SMP65#010 
-trainingFiles = [file for file in allFiles if file.endswith('.csv') and 'SMP65#010 70d' in file and 'full width' not in file]
+trainingFiles = [file for file in allFiles if file.endswith('.csv') and 'SMP65#010' in file and 'full width' not in file]
 
 trainingFiles = sorted(trainingFiles, key=lambda x: int(re.search(r'(?<= )(.+?)(?=d)', x).group()))
 
@@ -259,7 +269,7 @@ batch=128
 latent_dim = 16
 beta = 10.0
 
-epochs = 100
+epochs = 15
 
 array = np.asarray(betaVAE_trainingData.values, dtype=np.float32)
 
@@ -288,7 +298,7 @@ vae = BetaVAE(encoder, decoder, beta=beta)
 
 vae.compile(optimizer=keras.optimizers.Adam(learning_rate=1e-4))
 
-test_input = tf.random.normal(shape=(latent_dim, input_dim))  # Create a test input with the correct shape
+test_input = tf.random.normal(shape=(latent_dim, input_dim))  # Create a test input the shape (latent_dim, input_dim)
 
 vae(test_input)  # Build the model by calling it on a test input
 vae.fit(x=array, epochs=epochs, batch_size=batch)
