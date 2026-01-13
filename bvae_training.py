@@ -71,7 +71,6 @@ class Sampling(keras.layers.Layer):
         self.seed_generator = tf.random.set_seed(1337)
 
     def call(self, inputs):
-
         z_mean, z_log_var = inputs
         batch = tf.shape(z_mean)[0]
         dim = tf.shape(z_mean)[1]
@@ -80,18 +79,20 @@ class Sampling(keras.layers.Layer):
             shape=(batch, dim),
             seed=self.seed_generator
         )
-
+        return z_mean + keras.backend.exp(0.5 * z_log_var) * epsilon
         """
-        z_mean, z_log_var = args
+        Alternative implementation using tf.random.normal
+        z_mean, z_log_var = inputs
         set = tf.shape(z_mean)[0]
         batch = tf.shape(z_mean)[1]
         dim = tf.shape(z_mean)[-1]
         # by default, random_normal has mean=0 and std=1.0
-        epsilon = tf.random.normal(shape=(set, dim))#tfp.distributions.Normal(mean=tf.zeros(shape=(batch, dim)),loc=tf.ones(shape=(batch, dim)))
+        epsilon = tf.random.normal(shape=(set, dim)) #tfp.distributions.Normal(mean=tf.zeros(shape=(batch, dim)),loc=tf.ones(shape=(batch, dim)))
+
         return z_mean + (z_log_var * epsilon)
         """
+        
 
-        return z_mean + keras.backend.exp(0.5 * z_log_var) * epsilon
 
     
 
@@ -183,7 +184,7 @@ trainingFiles = sorted(trainingFiles, key=lambda x: int(re.search(r'(?<= )(.+?)(
 # Read all of the data and place the dataframes into a list
 trainingDataframeList = [pd.read_csv(path+file, low_memory=False, skiprows=[1,2]) for file in trainingFiles]
 
-testingModelFlag = True
+testingModelFlag = False
 if testingModelFlag:
     for i, dataframe in enumerate(trainingDataframeList):
         trainingDataframeList[i] = dataframe.sample(n=1000, random_state=42).reset_index(drop=True)  
