@@ -177,7 +177,7 @@ path = './training_data/'
 #List all of the files in the data directory.
 allFiles = os.listdir(path)
 # Take only the files that contain data pertaining to SMP65#010 
-trainingFiles = [file for file in allFiles if file.endswith('.csv') and 'SMP65#010' in file and 'full width' not in file]
+trainingFiles = [file for file in allFiles if file.endswith('.csv') and 'SMP65#010 14d' in file and 'full width' not in file]
 
 trainingFiles = sorted(trainingFiles, key=lambda x: int(re.search(r'(?<= )(.+?)(?=d)', x).group()))
 
@@ -197,7 +197,7 @@ wavenumbers = test_df.columns[last_nonwavenum_idx:]
 
 masked_trainingDataframeList = []
 
-stdDevs = 2
+stdDevs = 3
 
 for df in trainingDataframeList:
     selected_indexes, discarded_indexes, mask_selected, modePosition, areaPE = distribution_Selection(df, '1981.7 - 2095.8', stdDevs)
@@ -270,7 +270,7 @@ batch=128
 latent_dim = 16
 beta = 10.0
 
-epochs = 15
+epochs = 3
 
 array = np.asarray(betaVAE_trainingData.values, dtype=np.float32)
 
@@ -302,7 +302,9 @@ vae.compile(optimizer=keras.optimizers.Adam(learning_rate=1e-4))
 test_input = tf.random.normal(shape=(latent_dim, input_dim))  # Create a test input the shape (latent_dim, input_dim)
 
 vae(test_input)  # Build the model by calling it on a test input
-vae.fit(x=array, epochs=epochs, batch_size=batch)
+
+for i in range(len(array)):
+    vae.fit(x=np.array(wavenumbers), y=array[i], epochs=epochs, batch_size=batch)
 
 tf.saved_model.save(vae, "./new_vae/")
 tf.saved_model.save(encoder, './new_encoder/')
