@@ -90,11 +90,7 @@ class Sampling(keras.layers.Layer):
         epsilon = tf.random.normal(shape=(set, dim)) #tfp.distributions.Normal(mean=tf.zeros(shape=(batch, dim)),loc=tf.ones(shape=(batch, dim)))
 
         return z_mean + (z_log_var * epsilon)
-        """
-        
-
-
-    
+        """    
 
 """
 BetaVAE Model
@@ -270,7 +266,7 @@ batch=128
 latent_dim = 16
 beta = 10.0
 
-epochs = 3
+epochs = 10
 
 array = np.asarray(betaVAE_trainingData.values, dtype=np.float32)
 
@@ -303,8 +299,7 @@ test_input = tf.random.normal(shape=(latent_dim, input_dim))  # Create a test in
 
 vae(test_input)  # Build the model by calling it on a test input
 
-for i in range(len(array)):
-    vae.fit(x=np.array(wavenumbers), y=array[i], epochs=epochs, batch_size=batch)
+vae.fit(x=array, y=array, epochs=epochs, batch_size=batch)
 
 tf.saved_model.save(vae, "./new_vae/")
 tf.saved_model.save(encoder, './new_encoder/')
