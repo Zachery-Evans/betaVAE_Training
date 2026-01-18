@@ -1,6 +1,6 @@
 import os
-os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
-os.environ["KERAS BACKEND"] = "tensorflow"
+os.environ["TF_ENABLE_ONEDNN_OPTS"] = "1"
+#os.environ["KERAS BACKEND"] = "tensorflow"
 import re
 import pandas as pd
 import numpy as np
@@ -116,7 +116,7 @@ class BetaVAE(keras.Model):
             reconstruction = self.decoder(z)
 
             recon_loss = tf.reduce_mean(
-                tf.reduce_sum(keras.losses.binary_crossentropy(data, reconstruction))
+                tf.reduce_sum(keras.losses.mean_squared_error(data, reconstruction))
             )
 
             kl_loss = -0.5 * tf.reduce_mean(
@@ -173,7 +173,7 @@ path = './training_data/'
 #List all of the files in the data directory.
 allFiles = os.listdir(path)
 # Take only the files that contain data pertaining to SMP65#010 
-trainingFiles = [file for file in allFiles if file.endswith('.csv') and 'SMP65#010 14d' in file and 'full width' not in file]
+trainingFiles = [file for file in allFiles if file.endswith('.csv') and 'SMP65' in file and 'full width' not in file]
 
 trainingFiles = sorted(trainingFiles, key=lambda x: int(re.search(r'(?<= )(.+?)(?=d)', x).group()))
 
@@ -193,7 +193,7 @@ wavenumbers = test_df.columns[last_nonwavenum_idx:]
 
 masked_trainingDataframeList = []
 
-stdDevs = 3
+stdDevs = 4
 
 for df in trainingDataframeList:
     selected_indexes, discarded_indexes, mask_selected, modePosition, areaPE = distribution_Selection(df, '1981.7 - 2095.8', stdDevs)
@@ -235,8 +235,6 @@ for index, row in rawTrainingDataframe.iterrows():
 interpRawTrainingDataframe = pd.concat(interpDataFramelist, ignore_index=True)
 interpDataFramelist = None # Clear memory
 
-#print(interpRawTrainingDataframe)
-
 """
 K-fold Validation
 
@@ -261,12 +259,12 @@ betaVAE_trainingData = interpRawTrainingDataframe[wavenumbers]
 input_dim = len(wavenumbers)
 output_dim = input_dim
 
-batch=128
+batch=512
 
-latent_dim = 16
+latent_dim = 8
 beta = 10.0
 
-epochs = 10
+epochs = 8
 
 array = np.asarray(betaVAE_trainingData.values, dtype=np.float32)
 
@@ -287,6 +285,7 @@ Build the Decoder
 """
 latent_inputs = keras.Input(shape=(latent_dim,), name='latent_variables')
 x = layers.Dense(batch, activation='relu')(latent_inputs)
+x = layers.Dense(batch, activation='relu')(x)
 outputs = layers.Dense(output_dim, activation='linear')(x)
 decoder = keras.Model([latent_inputs], outputs, name='decoder')
 decoder.summary()
