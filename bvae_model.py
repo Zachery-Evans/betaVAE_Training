@@ -203,8 +203,6 @@ def pipeline(expt_wavenumber, expt_absorbance):
     f = expt_wavenumber
     a = expt_absorbance
 
-    interpolated_absorbance, interpolated_wavenumber = None, None
-
     #apply the interpolation to the spectral window
     interpolated_wavenumber, interpolated_absorbance = sp.interpolate_spectrum(f, a, 900, 1400)
 

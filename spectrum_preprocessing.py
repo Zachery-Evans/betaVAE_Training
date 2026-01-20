@@ -19,6 +19,7 @@ from scipy.stats import norm
 from scipy.integrate import simpson
 from scipy.spatial import ConvexHull
 from scipy.signal import find_peaks
+from scipy.stats import gaussian_kde
 
 def airpls(x, lam=100, porder=1, itermax=100):
     '''
@@ -311,3 +312,49 @@ def polynomial_background(wavenumber, absorbance, odr=10, s=0.006, fct='atq'):
     
     return z, a, it, odr, s, fct
 
+def roundWavenumbers(dataframe):
+    """
+    Function for rounding the wavenumbers so that there is no mismatch between the machine 
+    precision of saving the files in Quasar and the wavenumbers output by the FTIR microscope
+    """
+    last_nonwavenum_idx = dataframe.columns.get_loc('1981.7 - 2095.8') + 1
+
+    dataframe = dataframe.rename(columns=lambda c: round(float(c), 1) if c not in dataframe.columns[:last_nonwavenum_idx] else c)
+    return dataframe
+
+def distribution_Selection(df, distributionIdx, numberOfSigmas):
+    """
+    Screens data based on the distribution of a given column in a pandas dataframe. 
+    Built for screening out dataset values that do not have a sufficient 2019 wavenumber 
+    integral for the PEX project. Can be modified to projects liking. 
+
+    Returns the selected datas indexes, the discarded indexes, the mask used to select the data,
+    the x position of the distribution mode, and the column values of the distribution that is
+    being used to screen data. In this case the values of the baseline integral of the PE 2019
+    wavenumber peak. 
+    """
+    
+    df[distributionIdx] = df[distributionIdx].astype(float)
+
+    #creating variable for the array of Polyethylene Area
+    area = df['1981.7 - 2095.8'].values
+
+    # Use Gaussian KDE to find the center position of the rightmost mode by creating x coords
+    # and then using np.argmax to determine the point with the highest number of counts
+    kde = gaussian_kde(area)
+    xs = np.linspace(area.min(), area.max(), 1000) 
+    modePosition = xs[np.argmax(kde(xs))]
+
+    # Use only the values greater than 1.5 to determine the std of the PE peaks
+    positive_vals = area[area > 1.5]
+    sigma = positive_vals.std()
+
+    lowerDistributionBound = modePosition - numberOfSigmas * sigma
+    upperDistributionBound = modePosition + numberOfSigmas * sigma
+
+    # Select the range of PE normalization integral to be accepted by the mask
+    mask_selected = (area >= lowerDistributionBound) & (area <= upperDistributionBound)
+    selected_indexes = df.index[mask_selected]
+    discarded_indexes = df.index[~mask_selected]
+
+    return selected_indexes, discarded_indexes, mask_selected, modePosition, area
