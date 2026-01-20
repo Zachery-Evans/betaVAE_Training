@@ -212,10 +212,10 @@ betaVAE_trainingData = interpRawTrainingDataframe[wavenumbers]
 input_dim = len(wavenumbers)
 output_dim = input_dim
 
-batch=512
+batch=128
 
 latent_dim = 8
-beta = 10.0
+beta = 30.0
 
 epochs = 8
 
@@ -251,7 +251,7 @@ test_input = tf.random.normal(shape=(latent_dim, input_dim))  # Create a test in
 
 vae(test_input)  # Build the model by calling it on a test input
 
-vae.fit(x=array, y=array, epochs=epochs, batch_size=batch)
+vae.fit(x=array, y=array, epochs=epochs, batch_size=128)
 
 tf.saved_model.save(vae, "./new_vae/")
 tf.saved_model.save(encoder, './new_encoder/')

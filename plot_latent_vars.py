@@ -10,9 +10,11 @@ encoder = tf.saved_model.load("./new_encoder")
 
 path = './training_data/'
 
-file = path + 'SMP65#010 70d 820um.csv'
+file = path + 'SMP65#010 28d 820um.csv'
 
 dataframe = pd.read_csv(file, skiprows=[1,2])
+
+dataframe = dataframe.sample(frac=0.2, random_state=42).reset_index(drop=True)
 
 selected_indexes, discarded_indexes, mask_selected, modePosition, area = distribution_Selection(dataframe, '1981.7 - 2095.8', 3)
 dataframe = dataframe[mask_selected]
@@ -36,14 +38,15 @@ for index, row in dataframe.iterrows():
 
 interpRawTrainingDataframe = pd.concat(interpDataFramelist, ignore_index=True)
 interpDataFramelist = None # Clear memory
+dataframe = interpRawTrainingDataframe
+interpRawTrainingDataframe = None # Clear memory
 
-dataframe = dataframe[dataframe.columns[dataframe.columns.get_loc('1981.7 - 2095.8'):]]
 array = np.asarray(dataframe.values, dtype=np.float32)
 
 # display a 2D plot of the digit classes in the latent space
-z_mean, _= encoder.predict(array, verbose=0)
 
-print(z_mean.shape)
+bvae.reconstruction_plot(array)
+
 """
 plt.figure(figsize=(12, 10))
 plt.plot(z_mean[:, 0])
