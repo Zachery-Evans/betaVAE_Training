@@ -43,9 +43,19 @@ interpRawTrainingDataframe = None # Clear memory
 
 array = np.asarray(dataframe.values, dtype=np.float32)
 
-# display a 2D plot of the digit classes in the latent space
+test_array = array.astype('float32')
 
-bvae.reconstruction_plot(array)
+z_mean, z_log_var, _ = encoder(test_array, training=False)
+print("Z Mean shape:", z_mean.shape)
+print("Z Log Var shape:", z_log_var.shape)
+
+latent_log_vars = np.mean(z_log_var, axis=0)
+
+latent_vars = np.exp(latent_log_vars)
+for i in range(len(latent_vars)):
+    print(f"Latent Variable {i+1} Variance: {latent_vars[i]}")
+
+#print(z_log_var)
 
 """
 plt.figure(figsize=(12, 10))

@@ -214,8 +214,8 @@ output_dim = input_dim
 
 batch=128
 
-latent_dim = 16
-beta = 100.0
+latent_dim = 8
+beta = 25
 
 epochs = 8
 
