@@ -133,7 +133,7 @@ trainingFiles = sorted(trainingFiles, key=lambda x: int(re.search(r'(?<= )(.+?)(
 # Read all of the data and place the dataframes into a list
 trainingDataframeList = [pd.read_csv(path+file, low_memory=False, skiprows=[1,2]) for file in trainingFiles]
 
-testingModelFlag = False
+testingModelFlag = True
 if testingModelFlag:
     for i, dataframe in enumerate(trainingDataframeList):
         trainingDataframeList[i] = dataframe.sample(n=1000, random_state=42).reset_index(drop=True)  
@@ -214,8 +214,8 @@ output_dim = input_dim
 
 batch=128
 
-latent_dim = 8
-beta = 30.0
+latent_dim = 16
+beta = 100.0
 
 epochs = 8
 
@@ -250,8 +250,8 @@ vae.compile(optimizer=keras.optimizers.Adam(learning_rate=1e-4))
 test_input = tf.random.normal(shape=(latent_dim, input_dim))  # Create a test input the shape (latent_dim, input_dim)
 
 vae(test_input)  # Build the model by calling it on a test input
-
-vae.fit(x=array, y=array, epochs=epochs, batch_size=128)
+print(array.shape)
+vae.fit(x=array, y=array, epochs=epochs, batch_size=batch)
 
 tf.saved_model.save(vae, "./new_vae/")
 tf.saved_model.save(encoder, './new_encoder/')
