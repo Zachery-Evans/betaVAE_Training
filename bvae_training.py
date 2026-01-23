@@ -8,9 +8,9 @@ import tensorflow as tf
 import keras
 from keras import layers
 from scipy.stats import gaussian_kde
-from sklearn.model_selection import cross_val_score, KFold
 from spectrum_preprocessing import roundWavenumbers, distribution_Selection
 from bvae_model import pipeline
+import matplotlib.pyplot as plt
 
 """
 Reparameterization 
@@ -60,6 +60,8 @@ class BetaVAE(keras.Model):
         self.total_loss_tracker = keras.metrics.Mean(name="loss")
         self.recon_loss_tracker = keras.metrics.Mean(name="recon_loss")
         self.kl_loss_tracker = keras.metrics.Mean(name="kl_loss")
+    
+    
     
     def call(self, data):
         # Forward pass
@@ -146,7 +148,7 @@ wavenumbers = test_df.columns[last_nonwavenum_idx:]
 
 masked_trainingDataframeList = []
 
-stdDevs = 4
+stdDevs = 2
 
 for df in trainingDataframeList:
     selected_indexes, discarded_indexes, mask_selected, modePosition, areaPE = distribution_Selection(df, '1981.7 - 2095.8', stdDevs)
@@ -186,6 +188,10 @@ for index, row in rawTrainingDataframe.iterrows():
     interpDataFramelist.append(pd.DataFrame(data=[spectrum], columns=frequencies))
 
 interpRawTrainingDataframe = pd.concat(interpDataFramelist, ignore_index=True)
+
+for row in interpRawTrainingDataframe.iloc[:, :].itertuples(index=False):
+    plt.plot(interpRawTrainingDataframe.columns, row)
+plt.show()
 interpDataFramelist = None # Clear memory
 
 """
@@ -214,10 +220,10 @@ output_dim = input_dim
 
 batch=128
 
-latent_dim = 8
-beta = 25
+latent_dim = 16
+beta = 30
 
-epochs = 8
+epochs = 16
 
 array = np.asarray(betaVAE_trainingData.values, dtype=np.float32)
 
