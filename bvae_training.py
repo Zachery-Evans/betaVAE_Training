@@ -38,7 +38,6 @@ class BetaVAE(keras.Model):
         self.recon_loss_tracker = keras.metrics.Mean(name="recon_loss")
         self.kl_loss_tracker = keras.metrics.Mean(name="kl_loss")
 
-    @tf.function
     def call(self,data):
         z_mean, z_logvar, z = self.encoder(data)
         reconstruction = self.decoder(z)
@@ -55,11 +54,11 @@ class BetaVAE(keras.Model):
             reconstruction = self.decoder(z)
 
             recon_loss = tf.reduce_mean(
-                tf.math.reduce_sum(tf.square(data - reconstruction), axis=1)
+                tf.reduce_sum(tf.square(data - reconstruction), axis=1)
             )
 
             kl_loss = -0.5 * tf.reduce_mean(
-                tf.math.reduce_sum(1 + z_logvar - tf.square(z_mean) - tf.exp(z_logvar), axis=1)
+                tf.reduce_sum(1 + z_logvar - tf.square(z_mean) - tf.exp(z_logvar), axis=1)
             )
 
             total_loss = recon_loss + self.beta * kl_loss
@@ -75,6 +74,34 @@ class BetaVAE(keras.Model):
         "reconstruction_loss": recon_loss,
         "kl_loss": kl_loss,
         }
+    
+    def test_step(self, data):
+        if isinstance(data, tuple):
+            data = data[0]
+
+        z_mean, z_logvar, z = self.encoder(data, training=False)
+        reconstruction = self.decoder(z, training=False)
+
+        recon_loss = tf.reduce_mean(
+            tf.reduce_sum(tf.square(data - reconstruction), axis=1)
+        )
+
+        kl_loss = -0.5 * tf.reduce_mean(
+            tf.reduce_sum(1 + z_logvar - tf.square(z_mean) - tf.exp(z_logvar), axis=1)
+        )
+
+        total_loss = recon_loss + self.beta * kl_loss
+
+        self.total_loss_tracker.update_state(total_loss)
+        self.recon_loss_tracker.update_state(recon_loss)
+        self.kl_loss_tracker.update_state(kl_loss)
+
+        return {
+            "total_loss": total_loss,
+            "reconstruction_loss": recon_loss,
+            "kl_loss": kl_loss,
+        }
+
 
     @property
     def metrics(self):
@@ -95,7 +122,7 @@ class BetaVAE(keras.Model):
 Load and Format the VALIDATION data 
 
 """
-stdDevs = 3
+stdDevs = 2
 print("Loading and preprocessing validation data...")
 if not os.path.exists('./interpolated_validation_data.csv'):
     validation_df = pd.read_csv('./spectral_data/SMP65#013 35d 920um.csv', low_memory=False, skiprows=[1,2])
@@ -223,13 +250,13 @@ betaVAE_validationData = validation_df[wavenumbers]
 input_dim = len(wavenumbers)
 output_dim = input_dim
 
-batch=128
+batch = 16
 
 hidden_dim = 128
 
 latent_dim = 16
 
-beta = 50
+beta = 15
 
 epochs = 100
 
@@ -246,6 +273,7 @@ Build the Encoder
 
 """
 input = keras.Input(shape=input_dim, name='spectra_input') 
+x = layers.GaussianNoise(0.1)(input)
 x = layers.Dense(hidden_dim, activation='relu')(input) 
 x = layers.Dense(hidden_dim, activation='relu')(x) 
 z_mean = layers.Dense(latent_dim, name='z_mean')(x) 
@@ -272,21 +300,15 @@ Build the VAE Model and Train
 """
 vae = BetaVAE(encoder, decoder, beta)
 
-vae.compile(optimizer=keras.optimizers.Adam(learning_rate=1e-4))
-
-#test_input = tf.random.normal(shape=(latent_dim, input_dim))  # Create a test input the shape (latent_dim, input_dim)
-#vae(test_input)  # Build the model by calling it on a test input
-#vae.build(input_shape=(None, input_dim))
-print(vae.get_config())
+vae.compile(optimizer=keras.optimizers.Adam(learning_rate=1e-3))
 
 vae.fit(trainingArray, epochs=epochs, batch_size=batch)
-
 
 """
 Print the KL divergence for each latent dimension on the validation data
 
 """
-z_mean, z_log_var, _ = encoder(validationArray, training=False)
+z_mean, z_log_var, _ = encoder(trainingArray, training=False)
 #z_mean, z_log_var, _ = encoder(test_array, training=False)
 print("Z Mean shape:", z_mean.shape)
 print("Z Log Var shape:", z_log_var.shape)
