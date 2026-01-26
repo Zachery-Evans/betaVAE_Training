@@ -3,18 +3,18 @@ import pandas as pd
 import bvae_model as bvae
 import tensorflow as tf
 import numpy as np
-from spectrum_preprocessing import roundWavenumbers, distribution_Selection
+from spectrum_preprocessing import roundWavenumbers, distribution_Selection, pipeline
 
 decoder = tf.saved_model.load("./new_decoder")
 encoder = tf.saved_model.load("./new_encoder")
 
-path = './training_data/'
+path = './spectral_data/'
 
-file = path + 'SMP65#010 28d 820um.csv'
+file = path + 'SMP65#010 21d 820um.csv'
 
-dataframe = pd.read_csv(file, skiprows=[1,2])
+dataframe = pd.read_csv(file, low_memory=False, skiprows=[1,2])
 
-dataframe = dataframe.sample(frac=0.2, random_state=42).reset_index(drop=True)
+dataframe = dataframe.sample(frac=0.2, random_state=42).reset_index()
 
 selected_indexes, discarded_indexes, mask_selected, modePosition, area = distribution_Selection(dataframe, '1981.7 - 2095.8', 3)
 dataframe = dataframe[mask_selected]
@@ -32,7 +32,7 @@ for index, row in dataframe.iterrows():
     spectrum = row.to_numpy()
     spectrum = spectrum[::-1]  # Reverse the order for interpolation
     
-    frequencies, spectrum = bvae.pipeline(frequencies, spectrum)
+    frequencies, spectrum = pipeline(frequencies, spectrum)
 
     interpDataFramelist.append(pd.DataFrame(data=[spectrum], columns=frequencies))
 

@@ -1,5 +1,5 @@
 import os
-os.environ["TF_ENABLE_ONEDNN_OPTS"] = "1"
+os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 #os.environ["KERAS BACKEND"] = "tensorflow"
 import re
 import pandas as pd
@@ -7,9 +7,7 @@ import numpy as np
 import tensorflow as tf
 import keras
 from keras import layers
-from scipy.stats import gaussian_kde
-from spectrum_preprocessing import roundWavenumbers, distribution_Selection
-from bvae_model import pipeline
+from spectrum_preprocessing import roundWavenumbers, distribution_Selection, pipeline
 import matplotlib.pyplot as plt
 
 """
@@ -21,8 +19,9 @@ class Sampling(keras.layers.Layer):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+    
         self.seed_generator = tf.random.set_seed(1337)
-
+    
     def call(self, inputs):
         z_mean, z_log_var = inputs
         batch = tf.shape(z_mean)[0]
@@ -57,11 +56,9 @@ class BetaVAE(keras.Model):
         self.beta = beta
         self.seed_generator = tf.random.set_seed(1337)
 
-        self.total_loss_tracker = keras.metrics.Mean(name="loss")
+        self.total_loss_tracker = keras.metrics.Mean(name="total_loss")
         self.recon_loss_tracker = keras.metrics.Mean(name="recon_loss")
         self.kl_loss_tracker = keras.metrics.Mean(name="kl_loss")
-    
-    
     
     def call(self, data):
         # Forward pass
@@ -71,21 +68,21 @@ class BetaVAE(keras.Model):
             reconstruction = self.decoder(z)
 
             recon_loss = tf.reduce_mean(
-                tf.reduce_sum(keras.losses.mean_squared_error(data, reconstruction))
+                tf.math.reduce_sum(keras.losses.mean_squared_error(data, reconstruction))
             )
 
             kl_loss = -0.5 * tf.reduce_mean(
-                tf.reduce_sum(1 + z_logvar - tf.square(z_mean) - tf.exp(z_logvar))
+                tf.math.reduce_sum(1 + z_logvar - tf.square(z_mean) - tf.exp(z_logvar))
             )
 
             total_loss = recon_loss + self.beta * kl_loss
 
-            grads = tape.gradient(total_loss, self.trainable_weights)
-            self.optimizer.apply_gradients(zip(grads, self.trainable_weights))
-            self.recon_loss_tracker.update_state(recon_loss)
-            self.kl_loss_tracker.update_state(kl_loss)
+        grads = tape.gradient(total_loss, self.trainable_weights)
+        self.optimizer.apply_gradients(zip(grads, self.trainable_weights))
+        self.recon_loss_tracker.update_state(recon_loss)
+        self.kl_loss_tracker.update_state(kl_loss)
 
-        return recon_loss, kl_loss, total_loss
+        return recon_loss, self.beta*kl_loss, total_loss
 
     @property
     def metrics(self):
@@ -121,78 +118,110 @@ class BetaVAE(keras.Model):
         }
 
 """
-Load and Format the data for k-fold validation of the beta-VAE model
+Load and Format the validation and data for the beta VAE
+
 """
+stdDevs = 3
 
-path = './training_data/'
-#List all of the files in the data directory.
-allFiles = os.listdir(path)
-# Take only the files that contain data pertaining to SMP65#010 
-trainingFiles = [file for file in allFiles if file.endswith('.csv') and 'SMP65#010' in file and 'full width' not in file]
+if not os.path.exists('./interpolated_validation_data.csv'):
+    validation_df = pd.read_csv('./spectral_data/SMP65#010 21d 820um.csv', low_memory=False, skiprows=[1,2])
+    validation_df = roundWavenumbers(validation_df)
 
-trainingFiles = sorted(trainingFiles, key=lambda x: int(re.search(r'(?<= )(.+?)(?=d)', x).group()))
-
-# Read all of the data and place the dataframes into a list
-trainingDataframeList = [pd.read_csv(path+file, low_memory=False, skiprows=[1,2]) for file in trainingFiles]
-
-testingModelFlag = True
-if testingModelFlag:
-    for i, dataframe in enumerate(trainingDataframeList):
-        trainingDataframeList[i] = dataframe.sample(n=1000, random_state=42).reset_index(drop=True)  
-
-test_df = trainingDataframeList[0]
-test_df = roundWavenumbers(test_df)
-
-last_nonwavenum_idx = test_df.columns.get_loc('1981.7 - 2095.8') + 1
-wavenumbers = test_df.columns[last_nonwavenum_idx:]
-
-masked_trainingDataframeList = []
-
-stdDevs = 2
-
-for df in trainingDataframeList:
-    selected_indexes, discarded_indexes, mask_selected, modePosition, areaPE = distribution_Selection(df, '1981.7 - 2095.8', stdDevs)
-    masked_trainingDataframeList.append(df[mask_selected])
-
-test_df = None # Clear memory
-trainingDataframeList = None # Clear memory
-
-# Lambda function to round all of the wavenumbers so that column labels are all matching, and then concatenate all the datasets together
-rawTrainingDataframe = pd.concat(
-    (
-        df.rename(
-            columns=lambda c: round(float(c), 1) if c not in df.columns[:last_nonwavenum_idx] else c
-        )
-        for df in masked_trainingDataframeList
-    ),
-    ignore_index=True
-)
-
-masked_trainingDataframeList = None # Clear memory
-
-interpRawTrainingDataframe = pd.DataFrame()
-interpDataFramelist=[]
-print("Preprocessing and interpolating the training data...")
-# Interpolate the spectra to increase the accuracy of the model
-for index, row in rawTrainingDataframe.iterrows():
-
-    row = row[last_nonwavenum_idx:]
-
-    frequencies = row.index.to_numpy()
-    frequencies = frequencies[::-1]  # Reverse the order for interpolation
-    spectrum = row.to_numpy()
-    spectrum = spectrum[::-1]  # Reverse the order for interpolation
+    last_nonwavenum_idx = validation_df.columns.get_loc('1981.7 - 2095.8') + 1
+    wavenumbers = validation_df.columns[last_nonwavenum_idx:]
     
-    frequencies, spectrum = pipeline(frequencies, spectrum)
+    selected_indexes, discarded_indexes, mask_selected, modePosition, areaPE = distribution_Selection(validation_df, '1981.7 - 2095.8', stdDevs)
+    validation_df = validation_df[mask_selected]
 
-    interpDataFramelist.append(pd.DataFrame(data=[spectrum], columns=frequencies))
+    interpRawValidationDataframe = pd.DataFrame()
+    interpDataFramelist=[]
+    for index, row in validation_df.iterrows():
+        row = row[last_nonwavenum_idx:]
 
-interpRawTrainingDataframe = pd.concat(interpDataFramelist, ignore_index=True)
+        frequencies = row.index.to_numpy()
+        frequencies = frequencies[::-1]  # Reverse the order for interpolation
+        spectrum = row.to_numpy()
+        spectrum = spectrum[::-1]  # Reverse the order for interpolation
+        
+        frequencies, spectrum = pipeline(frequencies, spectrum)
 
-for row in interpRawTrainingDataframe.iloc[:, :].itertuples(index=False):
-    plt.plot(interpRawTrainingDataframe.columns, row)
-plt.show()
-interpDataFramelist = None # Clear memory
+        interpDataFramelist.append(pd.DataFrame(data=[spectrum], columns=frequencies))
+    validation_df = pd.concat(interpDataFramelist, ignore_index=True)
+    
+    interpDataFramelist = None # Clear memory
+
+    validation_df.to_csv("interpolated_validation_data.csv", index=False)
+else:
+    validation_df = pd.read_csv("interpolated_validation_data.csv", low_memory=False)
+
+
+"""
+Load and Format the training and data for the beta VAE
+
+"""
+if not os.path.exists('./interpolated_training_data.csv'):
+    path = './training_data/'
+    #List all of the files in the data directory.
+    allFiles = os.listdir(path)
+    # Take only the files that contain data pertaining to SMP65#010 
+    trainingFiles = [file for file in allFiles if file.endswith('.csv') and 'SMP65#010' in file and 'full width' not in file]
+
+    trainingFiles = sorted(trainingFiles, key=lambda x: int(re.search(r'(?<= )(.+?)(?=d)', x).group()))
+
+    # Read all of the data and place the dataframes into a list
+    trainingDataframeList = [pd.read_csv(path+file, low_memory=False, skiprows=[1,2]) for file in trainingFiles]
+
+    last_nonwavenum_idx = trainingDataframeList[0].columns.get_loc('1981.7 - 2095.8') + 1
+    wavenumbers = trainingDataframeList[0].columns[last_nonwavenum_idx:]
+    
+    masked_trainingDataframeList = []
+
+    for df in trainingDataframeList:
+        selected_indexes, discarded_indexes, mask_selected, modePosition, areaPE = distribution_Selection(df, '1981.7 - 2095.8', stdDevs)
+
+        masked_trainingDataframeList.append(df[mask_selected])
+    trainingDataframeList = None # Clear memory
+
+    # Lambda function to round all of the wavenumbers so that column labels are all matching, and then concatenate all the datasets together
+    rawTrainingDataframe = pd.concat(
+        (
+            df.rename(
+                columns=lambda c: round(float(c), 1) if c not in df.columns[:last_nonwavenum_idx] else c
+            )
+            for df in masked_trainingDataframeList
+        ),
+        ignore_index=True
+    )
+    masked_trainingDataframeList = None # Clear memory
+
+    interpRawTrainingDataframe = pd.DataFrame()
+    interpDataFramelist=[]
+
+    print("Preprocessing and interpolating the training data...")
+    # Interpolate the spectra to increase the accuracy of the model
+    for index, row in rawTrainingDataframe.iterrows():
+
+        row = row[last_nonwavenum_idx:]
+
+        frequencies = row.index.to_numpy()
+        frequencies = frequencies[::-1]  # Reverse the order for interpolation
+        spectrum = row.to_numpy()
+        spectrum = spectrum[::-1]  # Reverse the order for interpolation
+        
+        frequencies, spectrum = pipeline(frequencies, spectrum)
+
+        interpDataFramelist.append(pd.DataFrame(data=[spectrum], columns=frequencies))
+
+    interpRawTrainingDataframe = pd.concat(interpDataFramelist, ignore_index=True)
+    interpDataFramelist = None # Clear memory
+    interpRawTrainingDataframe.to_csv("interpolated_training_data.csv", index=False)
+
+    print("Data preprocessing and interpolation complete.")
+
+else:
+    interpRawTrainingDataframe = pd.read_csv("interpolated_training_data.csv", low_memory=False)
+    frequencies = interpRawTrainingDataframe.columns.astype(float)
+
 
 """
 K-fold Validation
@@ -213,19 +242,27 @@ rawTrainingDataframe["fold"] = rawTrainingDataframe["Sample Name"].map(fold_map)
 """
 Initialize the model, train the model and save. 
 """
-wavenumbers = sorted(frequencies)
+wavenumbers = [str(wavenumber) for wavenumber in sorted(frequencies)]
 betaVAE_trainingData = interpRawTrainingDataframe[wavenumbers]
+betaVAE_validationData = validation_df[wavenumbers]
 input_dim = len(wavenumbers)
 output_dim = input_dim
 
 batch=128
 
 latent_dim = 16
-beta = 30
 
-epochs = 16
+beta = 2
 
-array = np.asarray(betaVAE_trainingData.values, dtype=np.float32)
+epochs = 30
+
+trainingArray = np.asarray(betaVAE_trainingData.values, dtype=np.float32)
+validationArray = np.asarray(betaVAE_validationData.values, dtype=np.float32)
+
+interpRawValidationDataframe = None # Clear memory
+validation_df = None # Clear memory
+betaVAE_trainingData = None # Clear memory
+betaVAE_validationData = None # Clear memory
 
 """
 Build the Encoder
@@ -249,15 +286,15 @@ outputs = layers.Dense(output_dim, activation='linear')(x)
 decoder = keras.Model([latent_inputs], outputs, name='decoder')
 decoder.summary()
 
-vae = BetaVAE(encoder, decoder, beta=beta)
+vae = BetaVAE(encoder, decoder, beta)
 
-vae.compile(optimizer=keras.optimizers.Adam(learning_rate=1e-4))
+vae.compile(optimizer=keras.optimizers.Adam(learning_rate=1e-4), loss = keras.losses.MeanSquaredError())
 
 test_input = tf.random.normal(shape=(latent_dim, input_dim))  # Create a test input the shape (latent_dim, input_dim)
 
 vae(test_input)  # Build the model by calling it on a test input
-print(array.shape)
-vae.fit(x=array, y=array, epochs=epochs, batch_size=batch)
+print(trainingArray.shape)
+vae.fit(x=trainingArray, y=trainingArray, epochs=epochs, batch_size=batch, validation_data=(validationArray, validationArray))
 
 tf.saved_model.save(vae, "./new_vae/")
 tf.saved_model.save(encoder, './new_encoder/')

@@ -1,3 +1,5 @@
 
 /spectral_data/
 /training_data/
+/interpolated_training_data.csv
+/interpolated_validation_data.csv
