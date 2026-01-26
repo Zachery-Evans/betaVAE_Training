@@ -1,6 +1,6 @@
 import os
 os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
-#os.environ["KERAS BACKEND"] = "tensorflow"
+os.environ["KERAS BACKEND"] = "tensorflow"
 import re
 import pandas as pd
 import numpy as np
@@ -17,32 +17,10 @@ Reparameterization
 class Sampling(keras.layers.Layer):
     """Uses (z_mean, z_log_var) to sample z, the vector encoding a digit."""
 
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-    
-        self.seed_generator = tf.random.set_seed(1337)
-    
     def call(self, inputs):
         z_mean, z_log_var = inputs
-        batch = tf.shape(z_mean)[0]
-        dim = tf.shape(z_mean)[1]
-
-        epsilon = keras.backend.random_normal(
-            shape=(batch, dim),
-            seed=self.seed_generator
-        )
-        return z_mean + keras.backend.exp(0.5 * z_log_var) * epsilon
-        """
-        Alternative implementation using tf.random.normal
-        z_mean, z_log_var = inputs
-        set = tf.shape(z_mean)[0]
-        batch = tf.shape(z_mean)[1]
-        dim = tf.shape(z_mean)[-1]
-        # by default, random_normal has mean=0 and std=1.0
-        epsilon = tf.random.normal(shape=(set, dim)) #tfp.distributions.Normal(mean=tf.zeros(shape=(batch, dim)),loc=tf.ones(shape=(batch, dim)))
-
-        return z_mean + (z_log_var * epsilon)
-        """    
+        epsilon = tf.random.normal(shape=tf.shape(z_mean))
+        return z_mean + tf.exp(0.5 * z_log_var) * epsilon
 
 """
 BetaVAE Model
@@ -54,35 +32,49 @@ class BetaVAE(keras.Model):
         self.encoder = encoder # ENCODER HAS THE SAMPLING LAYER INSIDE
         self.decoder = decoder
         self.beta = beta
-        self.seed_generator = tf.random.set_seed(1337)
 
+        # Trackers for the total, reconstruction, and KL losses
         self.total_loss_tracker = keras.metrics.Mean(name="total_loss")
         self.recon_loss_tracker = keras.metrics.Mean(name="recon_loss")
         self.kl_loss_tracker = keras.metrics.Mean(name="kl_loss")
+
+    @tf.function
+    def call(self,data):
+        z_mean, z_logvar, z = self.encoder(data)
+        reconstruction = self.decoder(z)
+        return reconstruction
     
-    def call(self, data):
-        # Forward pass
+    def train_step(self, data):
+
+        if isinstance(data, tuple):
+            data = data[0]   # keep only x
+
         with tf.GradientTape() as tape:
-            x = self.encoder(data)
-            z_mean, z_logvar, z = tf.split(x, num_or_size_splits=3)
+            
+            z_mean, z_logvar, z = self.encoder(data)
             reconstruction = self.decoder(z)
 
             recon_loss = tf.reduce_mean(
-                tf.math.reduce_sum(keras.losses.mean_squared_error(data, reconstruction))
+                tf.math.reduce_sum(tf.square(data - reconstruction), axis=1)
             )
 
             kl_loss = -0.5 * tf.reduce_mean(
-                tf.math.reduce_sum(1 + z_logvar - tf.square(z_mean) - tf.exp(z_logvar))
+                tf.math.reduce_sum(1 + z_logvar - tf.square(z_mean) - tf.exp(z_logvar), axis=1)
             )
 
             total_loss = recon_loss + self.beta * kl_loss
 
         grads = tape.gradient(total_loss, self.trainable_weights)
         self.optimizer.apply_gradients(zip(grads, self.trainable_weights))
+        self.total_loss_tracker.update_state(total_loss)
         self.recon_loss_tracker.update_state(recon_loss)
         self.kl_loss_tracker.update_state(kl_loss)
 
-        return recon_loss, self.beta*kl_loss, total_loss
+        return  {
+        "total_loss": total_loss,
+        "reconstruction_loss": recon_loss,
+        "kl_loss": kl_loss,
+        }
 
     @property
     def metrics(self):
@@ -99,32 +91,14 @@ class BetaVAE(keras.Model):
         })
         return config
 
-    """
-    The training of the Model, here we have the minimization of the loss function and define the loss
-    function of the beta VAE to include the beta normalization term.
-    """
-    @tf.function
-    def train_step(self, data):
-        
-        if isinstance(data, tuple):
-            data = data[0]
-
-        recon_loss, kl_loss, total_loss = self.call(data)
-
-        return {
-            "loss": total_loss,
-            "reconstruction_loss": recon_loss,
-            "kl_loss": kl_loss,
-        }
-
 """
-Load and Format the validation and data for the beta VAE
+Load and Format the VALIDATION data 
 
 """
 stdDevs = 3
-
+print("Loading and preprocessing validation data...")
 if not os.path.exists('./interpolated_validation_data.csv'):
-    validation_df = pd.read_csv('./spectral_data/SMP65#010 21d 820um.csv', low_memory=False, skiprows=[1,2])
+    validation_df = pd.read_csv('./spectral_data/SMP65#013 35d 920um.csv', low_memory=False, skiprows=[1,2])
     validation_df = roundWavenumbers(validation_df)
 
     last_nonwavenum_idx = validation_df.columns.get_loc('1981.7 - 2095.8') + 1
@@ -143,9 +117,10 @@ if not os.path.exists('./interpolated_validation_data.csv'):
         spectrum = row.to_numpy()
         spectrum = spectrum[::-1]  # Reverse the order for interpolation
         
-        frequencies, spectrum = pipeline(frequencies, spectrum)
+        interp_frequencies, interp_spectrum = pipeline(frequencies, spectrum)
 
-        interpDataFramelist.append(pd.DataFrame(data=[spectrum], columns=frequencies))
+        interpDataFramelist.append(pd.DataFrame(data=[interp_spectrum], columns=interp_frequencies))
+
     validation_df = pd.concat(interpDataFramelist, ignore_index=True)
     
     interpDataFramelist = None # Clear memory
@@ -156,9 +131,10 @@ else:
 
 
 """
-Load and Format the training and data for the beta VAE
+Load and Format the TRAINING data
 
 """
+print("Loading and preprocessing training data...")
 if not os.path.exists('./interpolated_training_data.csv'):
     path = './training_data/'
     #List all of the files in the data directory.
@@ -197,7 +173,6 @@ if not os.path.exists('./interpolated_training_data.csv'):
     interpRawTrainingDataframe = pd.DataFrame()
     interpDataFramelist=[]
 
-    print("Preprocessing and interpolating the training data...")
     # Interpolate the spectra to increase the accuracy of the model
     for index, row in rawTrainingDataframe.iterrows():
 
@@ -250,11 +225,13 @@ output_dim = input_dim
 
 batch=128
 
+hidden_dim = 128
+
 latent_dim = 16
 
-beta = 2
+beta = 50
 
-epochs = 30
+epochs = 100
 
 trainingArray = np.asarray(betaVAE_trainingData.values, dtype=np.float32)
 validationArray = np.asarray(betaVAE_validationData.values, dtype=np.float32)
@@ -266,47 +243,77 @@ betaVAE_validationData = None # Clear memory
 
 """
 Build the Encoder
+
 """
 input = keras.Input(shape=input_dim, name='spectra_input') 
-x = layers.Dense(batch, activation='relu')(input) 
-x = layers.Dense(batch, activation='relu')(x) 
+x = layers.Dense(hidden_dim, activation='relu')(input) 
+x = layers.Dense(hidden_dim, activation='relu')(x) 
 z_mean = layers.Dense(latent_dim, name='z_mean')(x) 
 z_logvar = layers.Dense(latent_dim, name='z_logvar')(x) 
+z_logvar = tf.clip_by_value(z_logvar, -10, 10)
 z = Sampling()([z_mean, z_logvar])
 encoder = keras.Model(inputs=input, outputs=[z_mean, z_logvar, z], name='encoder')
 encoder.summary()
 
 """
 Build the Decoder 
+
 """
 latent_inputs = keras.Input(shape=(latent_dim,), name='latent_variables')
-x = layers.Dense(batch, activation='relu')(latent_inputs)
-x = layers.Dense(batch, activation='relu')(x)
+x = layers.Dense(hidden_dim, activation='relu')(latent_inputs)
+x = layers.Dense(hidden_dim, activation='relu')(x)
 outputs = layers.Dense(output_dim, activation='linear')(x)
 decoder = keras.Model([latent_inputs], outputs, name='decoder')
 decoder.summary()
 
+"""
+Build the VAE Model and Train
+
+"""
 vae = BetaVAE(encoder, decoder, beta)
 
-vae.compile(optimizer=keras.optimizers.Adam(learning_rate=1e-4), loss = keras.losses.MeanSquaredError())
+vae.compile(optimizer=keras.optimizers.Adam(learning_rate=1e-4))
 
-test_input = tf.random.normal(shape=(latent_dim, input_dim))  # Create a test input the shape (latent_dim, input_dim)
+#test_input = tf.random.normal(shape=(latent_dim, input_dim))  # Create a test input the shape (latent_dim, input_dim)
+#vae(test_input)  # Build the model by calling it on a test input
+#vae.build(input_shape=(None, input_dim))
+print(vae.get_config())
 
-vae(test_input)  # Build the model by calling it on a test input
-print(trainingArray.shape)
-vae.fit(x=trainingArray, y=trainingArray, epochs=epochs, batch_size=batch, validation_data=(validationArray, validationArray))
+vae.fit(trainingArray, epochs=epochs, batch_size=batch)
 
-tf.saved_model.save(vae, "./new_vae/")
+
+"""
+Print the KL divergence for each latent dimension on the validation data
+
+"""
+z_mean, z_log_var, _ = encoder(validationArray, training=False)
+#z_mean, z_log_var, _ = encoder(test_array, training=False)
+print("Z Mean shape:", z_mean.shape)
+print("Z Log Var shape:", z_log_var.shape)
+
+kl_per_dim = 0.5 * np.mean(
+    z_mean**2 + np.exp(z_log_var) - z_log_var - 1,
+    axis=0
+)
+
+for i, kl in enumerate(kl_per_dim):
+    print(f"Latent {i+1} KL: {kl:.3f}")
+
+
+"""
+Save the model and reload to test that it saved correctly
+
+"""
+
+#tf.saved_model.save(vae, "./new_vae/")
 tf.saved_model.save(encoder, './new_encoder/')
 tf.saved_model.save(decoder, './new_decoder/')
 
 saved_encoder = tf.saved_model.load("./new_encoder/")
 saved_decoder = tf.saved_model.load("./new_decoder/")
-saved_vae = tf.saved_model.load("./new_vae/")
+#saved_vae = tf.saved_model.load("./new_vae/")
 
-#print(saved_vae.signatures)
-
-if saved_vae is not None and saved_encoder is not None and saved_decoder is not None:
+if saved_encoder is not None and saved_decoder is not None:
     print("All models loaded successfully!")
 
 else:
