@@ -38,12 +38,9 @@ for index, row in dataframe.iterrows():
 
 interpRawTrainingDataframe = pd.concat(interpDataFramelist, ignore_index=True)
 interpDataFramelist = None # Clear memory
-dataframe = interpRawTrainingDataframe
+
+test_array = np.asarray(interpRawTrainingDataframe.values, dtype=np.float32)
 interpRawTrainingDataframe = None # Clear memory
-
-array = np.asarray(dataframe.values, dtype=np.float32)
-
-test_array = array.astype('float32')
 
 z_mean, z_log_var, _ = encoder(test_array, training=False)
 print("Z Mean shape:", z_mean.shape)
