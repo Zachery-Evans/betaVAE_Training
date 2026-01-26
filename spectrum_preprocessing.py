@@ -358,3 +358,85 @@ def distribution_Selection(df, distributionIdx, numberOfSigmas):
     discarded_indexes = df.index[~mask_selected]
 
     return selected_indexes, discarded_indexes, mask_selected, modePosition, area
+
+def thickness_normalizer(spectrum_array, IntStd):
+    """"
+    Normalize the spectrum to correct for differences in slice thickness.
+    
+    Arguments:
+        spectrum_array {array} -- An array corresponding to the absorbance values of an IR spectrum.
+        IntStd {float} -- The integrated area (2050-2000 cm-1) of the PE internal standard absorbance band.
+        
+    Returns:
+        normalized_spectrum_array {array} -- The IR absorbance spectrum corrected for thickness
+    
+    """
+    thickness_normalizer = (IntStd/34)
+    normalized_spectrum_array = np.array(spectrum_array)/thickness_normalizer
+    
+    return normalized_spectrum_array
+
+def pipeline(expt_wavenumber, expt_absorbance):
+    f = expt_wavenumber
+    a = expt_absorbance
+
+    internal_std_int = calculate_peak_intensity(f, a, (1990,2090))[1]
+    a = a / internal_std_int
+    Std = integrate_peak(f, a, low=2000, high=2050)
+    normalized_absorbance = thickness_normalizer(a, Std)
+
+    #apply the interpolation to the spectral window
+    interpolated_wavenumber, interpolated_absorbance = interpolate_spectrum(f, normalized_absorbance, 898, 1400)
+
+    #calculate the baseline
+    baseline1 = airpls(interpolated_absorbance)
+    #baseline correct the spectrum
+    corrected1 = interpolated_absorbance - baseline1
+
+    baseline2 = polynomial_background(interpolated_wavenumber, corrected1, odr=2, s=0.006, fct='atq')[0]
+    corrected2 = corrected1 - baseline2
+
+    baseline3 = rubberband_baseline(interpolated_wavenumber, corrected2)
+    corrected3 = corrected2 - baseline3
+
+    fingerprint_cm = interpolated_wavenumber
+    fingerprint_abs = corrected3
+    
+    #apply the interpolation to the spectral window
+    interpolated_wavenumber, interpolated_absorbance = interpolate_spectrum(f, normalized_absorbance, 1520, 1800)
+    #calculate the baseline
+    baseline1 = airpls(interpolated_absorbance)
+
+    #baseline correct the spectrum
+    corrected1 = interpolated_absorbance - baseline1
+
+    baseline2 = rubberband_baseline(interpolated_wavenumber, corrected1)
+    corrected2 = corrected1 - baseline2
+
+    carbonyl_cm = interpolated_wavenumber
+    carbonyl_abs = corrected2
+
+    """  Uninformative region containing unchanging PE bands
+
+    #apply the interpolation to the spectral window
+    interpolated_wavenumber, interpolated_absorbance = sp.interpolate_spectrum(f, normalized_absorbance, 1850, 2110)
+    #calculate the baseline
+    baseline1 = sp.airpls(interpolated_absorbance)
+    #baseline correct the spectrum
+    corrected1 = interpolated_absorbance - baseline1
+
+    baseline2 = sp.rubberband_baseline(interpolated_wavenumber, corrected1)
+    corrected2 = corrected1 - baseline2
+
+    polyethylene_cm = interpolated_wavenumber
+    polyethylene_abs = corrected2
+    """
+    
+    def merge_arrays(arr1, arr2):
+        merged_array = np.concatenate((arr1, arr2))
+        return merged_array
+    
+    wavenumber = merge_arrays(fingerprint_cm, carbonyl_cm)
+    absorbance = merge_arrays(fingerprint_abs, carbonyl_abs)
+    
+    return wavenumber, absorbance
