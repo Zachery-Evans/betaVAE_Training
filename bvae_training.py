@@ -300,7 +300,7 @@ Build the VAE Model and Train
 """
 vae = BetaVAE(encoder, decoder, beta)
 
-vae.compile(optimizer=keras.optimizers.Adam(learning_rate=1e-3))
+vae.compile(optimizer=keras.optimizers.Adam(learning_rate=1e-4))
 
 vae.fit(trainingArray, epochs=epochs, batch_size=batch)
 
@@ -331,12 +331,31 @@ Save the model and reload to test that it saved correctly
 tf.saved_model.save(encoder, './new_encoder/')
 tf.saved_model.save(decoder, './new_decoder/')
 
+encoder = None # Clear memory
+decoder = None # Clear memory
+
 saved_encoder = tf.saved_model.load("./new_encoder/")
 saved_decoder = tf.saved_model.load("./new_decoder/")
 #saved_vae = tf.saved_model.load("./new_vae/")
 
 if saved_encoder is not None and saved_decoder is not None:
     print("All models loaded successfully!")
+
+    z_mean, z_log_var, _ = saved_encoder(trainingArray, training=False)
+    #z_mean, z_log_var, _ = encoder(test_array, training=False)
+    print("Z Mean shape:", z_mean.shape)
+    print("Z Log Var shape:", z_log_var.shape)
+
+    kl_per_dim = 0.5 * np.mean(
+        z_mean**2 + np.exp(z_log_var) - z_log_var - 1,
+        axis=0
+    )
+
+    for i, kl in enumerate(kl_per_dim):
+        print(f"Latent {i+1} KL: {kl:.3f}")
+
+    saved_encoder = None
+    saved_decoder = None
 
 else:
     print("Failed to load the model.")
