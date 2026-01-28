@@ -11,6 +11,22 @@ from spectrum_preprocessing import roundWavenumbers, distribution_Selection, pip
 import matplotlib.pyplot as plt
 
 """
+Cyclical Callback for Annealing the Beta Value
+
+"""
+class CyclicalBetaCallback(keras.callbacks.Callback):
+    def __init__(self, vae, cycle_length=20, warmup_ratio=0.5, beta_max=15):
+        self.vae = vae
+        self.cycle_length = cycle_length
+        self.warmup_ratio = warmup_ratio
+        self.beta_max = beta_max
+
+    def on_epoch_begin(self, epoch, logs=None):
+        cycle_pos = epoch % self.cycle_length
+        warmup_epochs = int(self.cycle_length * self.warmup_ratio)
+        self.vae.beta = self.beta_max * min(1.0, cycle_pos / warmup_epochs)
+
+"""
 Reparameterization 
 
 """
@@ -250,15 +266,15 @@ betaVAE_validationData = validation_df[wavenumbers]
 input_dim = len(wavenumbers)
 output_dim = input_dim
 
-batch = 16
+batch = 64
 
 hidden_dim = 128
 
 latent_dim = 16
 
-beta = 15
+beta = 30
 
-epochs = 100
+epochs = 300
 
 trainingArray = np.asarray(betaVAE_trainingData.values, dtype=np.float32)
 validationArray = np.asarray(betaVAE_validationData.values, dtype=np.float32)
@@ -273,7 +289,7 @@ Build the Encoder
 
 """
 input = keras.Input(shape=input_dim, name='spectra_input') 
-x = layers.GaussianNoise(0.1)(input)
+x = layers.GaussianNoise(0.05)(input)
 x = layers.Dense(hidden_dim, activation='relu')(input) 
 x = layers.Dense(hidden_dim, activation='relu')(x) 
 z_mean = layers.Dense(latent_dim, name='z_mean')(x) 
@@ -302,7 +318,7 @@ vae = BetaVAE(encoder, decoder, beta)
 
 vae.compile(optimizer=keras.optimizers.Adam(learning_rate=1e-4))
 
-vae.fit(trainingArray, epochs=epochs, batch_size=batch)
+vae.fit(trainingArray, epochs=epochs, batch_size=batch, callbacks=[CyclicalBetaCallback(vae, cycle_length=30, warmup_ratio=0.5, beta_max = beta)])
 
 """
 Print the KL divergence for each latent dimension on the validation data
@@ -320,6 +336,10 @@ kl_per_dim = 0.5 * np.mean(
 
 for i, kl in enumerate(kl_per_dim):
     print(f"Latent {i+1} KL: {kl:.3f}")
+
+indices_of_largest = np.argsort(kl_per_dim)[-3:]
+
+print("Three largest KL divergences:", indices_of_largest)
 
 
 """
