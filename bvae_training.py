@@ -11,6 +11,20 @@ from spectrum_preprocessing import roundWavenumbers, distribution_Selection, pip
 import matplotlib.pyplot as plt
 
 """
+Linear Callback for Annealing the Beta Value
+
+"""
+class LinearBetaCallback(keras.callbacks.Callback):
+    def __init__(self, vae, warmup_epochs, beta_max):
+        self.vae = vae
+        self.warmup_epochs = warmup_epochs
+        self.beta_max = beta_max
+
+    def on_epoch_begin(self, epoch, logs=None):
+        self.vae.beta = self.beta_max * min(1.0, epoch / self.warmup_epochs)
+
+
+"""
 Cyclical Callback for Annealing the Beta Value
 
 """
@@ -268,11 +282,12 @@ output_dim = input_dim
 
 batch = 64
 
-hidden_dim = 128
+hidden_dim1 = 128
+hidden_dim2 = 64
 
 latent_dim = 16
 
-beta = 30
+beta = 50
 
 epochs = 300
 
@@ -289,9 +304,8 @@ Build the Encoder
 
 """
 input = keras.Input(shape=input_dim, name='spectra_input') 
-x = layers.GaussianNoise(0.05)(input)
-x = layers.Dense(hidden_dim, activation='relu')(input) 
-x = layers.Dense(hidden_dim, activation='relu')(x) 
+x = layers.Dense(hidden_dim1, activation='relu')(input) 
+x = layers.Dense(hidden_dim2, activation='relu')(x) 
 z_mean = layers.Dense(latent_dim, name='z_mean')(x) 
 z_logvar = layers.Dense(latent_dim, name='z_logvar')(x) 
 z_logvar = tf.clip_by_value(z_logvar, -10, 10)
@@ -304,8 +318,8 @@ Build the Decoder
 
 """
 latent_inputs = keras.Input(shape=(latent_dim,), name='latent_variables')
-x = layers.Dense(hidden_dim, activation='relu')(latent_inputs)
-x = layers.Dense(hidden_dim, activation='relu')(x)
+x = layers.Dense(hidden_dim2, activation='relu')(latent_inputs)
+x = layers.Dense(hidden_dim1, activation='relu')(x)
 outputs = layers.Dense(output_dim, activation='linear')(x)
 decoder = keras.Model([latent_inputs], outputs, name='decoder')
 decoder.summary()
@@ -316,9 +330,9 @@ Build the VAE Model and Train
 """
 vae = BetaVAE(encoder, decoder, beta)
 
-vae.compile(optimizer=keras.optimizers.Adam(learning_rate=1e-4))
+vae.compile(optimizer=keras.optimizers.Adam(learning_rate=1e-4), loss='mse')
 
-vae.fit(trainingArray, epochs=epochs, batch_size=batch, callbacks=[CyclicalBetaCallback(vae, cycle_length=30, warmup_ratio=0.5, beta_max = beta)])
+vae.fit(trainingArray, epochs=epochs, batch_size=batch, callbacks=[LinearBetaCallback(vae, warmup_epochs=30, beta_max=beta)])
 
 """
 Print the KL divergence for each latent dimension on the validation data
@@ -372,7 +386,7 @@ if saved_encoder is not None and saved_decoder is not None:
     )
 
     for i, kl in enumerate(kl_per_dim):
-        print(f"Latent {i+1} KL: {kl:.3f}")
+        print(f"Latent {i} KL: {kl:.3f}")
 
     saved_encoder = None
     saved_decoder = None

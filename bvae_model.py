@@ -44,9 +44,9 @@ def encoder(normalized_spectrum_array):
     """
     normalized_spectrum_array = normalized_spectrum_array.astype('float32')
     encoded_spectrum = loaded_encoder([normalized_spectrum_array])
-    L1 = 1*np.array(encoded_spectrum[0])[0][9]
-    L2 = 1*np.array(encoded_spectrum[0])[0][14]
-    L3 = -1*np.array(encoded_spectrum[0])[0][12]
+    L1 = 1*np.array(encoded_spectrum[0])[0][1]
+    L2 = 1*np.array(encoded_spectrum[0])[0][3]
+    L3 = -1*np.array(encoded_spectrum[0])[0][2]
     
     return L1,L2,L3
 

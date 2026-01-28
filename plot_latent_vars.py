@@ -8,39 +8,9 @@ from spectrum_preprocessing import roundWavenumbers, distribution_Selection, pip
 decoder = tf.saved_model.load("./new_decoder")
 encoder = tf.saved_model.load("./new_encoder")
 
-path = './spectral_data/'
+file =  'interpolated_training_data.csv'
 
-file = path + 'SMP65#010 21d 820um.csv'
-
-dataframe = pd.read_csv(file, low_memory=False, skiprows=[1,2])
-
-dataframe = dataframe.sample(frac=0.2, random_state=42).reset_index()
-
-selected_indexes, discarded_indexes, mask_selected, modePosition, area = distribution_Selection(dataframe, '1981.7 - 2095.8', 3)
-dataframe = dataframe[mask_selected]
-dataframe = roundWavenumbers(dataframe)
-
-last_nonwavenum_idx = dataframe.columns.get_loc('1981.7 - 2095.8') + 1
-
-interpDataFramelist = []
-for index, row in dataframe.iterrows():
-
-    row = row[last_nonwavenum_idx:]
-
-    frequencies = row.index.to_numpy()
-    frequencies = frequencies[::-1]  # Reverse the order for interpolation
-    spectrum = row.to_numpy()
-    spectrum = spectrum[::-1]  # Reverse the order for interpolation
-    
-    frequencies, spectrum = pipeline(frequencies, spectrum)
-
-    interpDataFramelist.append(pd.DataFrame(data=[spectrum], columns=frequencies))
-
-interpRawTrainingDataframe = pd.concat(interpDataFramelist, ignore_index=True)
-interpDataFramelist = None # Clear memory
-
-test_array = np.asarray(interpRawTrainingDataframe.values, dtype=np.float32)
-interpRawTrainingDataframe = None # Clear memory
+test_array = pd.read_csv(file, header=None).to_numpy().astype('float32')
 
 z_mean, z_log_var, _ = encoder(test_array, training=False)
 print("Z Mean shape:", z_mean.shape)
