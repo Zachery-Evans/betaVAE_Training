@@ -285,9 +285,9 @@ batch = 128
 hidden_dim1 = 128
 hidden_dim2 = 128
 
-latent_dim = 16
+latent_dim = 3
 
-beta = 5
+beta = 30
 
 epochs = 300
 
