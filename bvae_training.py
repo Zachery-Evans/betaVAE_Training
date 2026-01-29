@@ -280,14 +280,14 @@ betaVAE_validationData = validation_df[wavenumbers]
 input_dim = len(wavenumbers)
 output_dim = input_dim
 
-batch = 64
+batch = 128
 
 hidden_dim1 = 128
-hidden_dim2 = 64
+hidden_dim2 = 128
 
 latent_dim = 16
 
-beta = 50
+beta = 5
 
 epochs = 300
 
@@ -304,6 +304,7 @@ Build the Encoder
 
 """
 input = keras.Input(shape=input_dim, name='spectra_input') 
+x = layers.GaussianNoise(0.05)(input)
 x = layers.Dense(hidden_dim1, activation='relu')(input) 
 x = layers.Dense(hidden_dim2, activation='relu')(x) 
 z_mean = layers.Dense(latent_dim, name='z_mean')(x) 
@@ -330,16 +331,15 @@ Build the VAE Model and Train
 """
 vae = BetaVAE(encoder, decoder, beta)
 
-vae.compile(optimizer=keras.optimizers.Adam(learning_rate=1e-4), loss='mse')
+vae.compile(optimizer=keras.optimizers.Adam(learning_rate=1e-4), loss='mse', metrics=['mse'])
 
-vae.fit(trainingArray, epochs=epochs, batch_size=batch, callbacks=[LinearBetaCallback(vae, warmup_epochs=30, beta_max=beta)])
+vae.fit(trainingArray, trainingArray, epochs=epochs, batch_size=batch, callbacks=[CyclicalBetaCallback(vae, cycle_length=30, beta_max=beta)])
 
 """
 Print the KL divergence for each latent dimension on the validation data
 
 """
 z_mean, z_log_var, _ = encoder(trainingArray, training=False)
-#z_mean, z_log_var, _ = encoder(test_array, training=False)
 print("Z Mean shape:", z_mean.shape)
 print("Z Log Var shape:", z_log_var.shape)
 
@@ -350,10 +350,6 @@ kl_per_dim = 0.5 * np.mean(
 
 for i, kl in enumerate(kl_per_dim):
     print(f"Latent {i+1} KL: {kl:.3f}")
-
-indices_of_largest = np.argsort(kl_per_dim)[-3:]
-
-print("Three largest KL divergences:", indices_of_largest)
 
 
 """
@@ -387,6 +383,10 @@ if saved_encoder is not None and saved_decoder is not None:
 
     for i, kl in enumerate(kl_per_dim):
         print(f"Latent {i} KL: {kl:.3f}")
+
+    indices_of_largest = np.argsort(kl_per_dim)[-3:]
+
+    print("Three largest KL divergences:", indices_of_largest)
 
     saved_encoder = None
     saved_decoder = None
