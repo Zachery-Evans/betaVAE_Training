@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 Linear Callback for Annealing the Beta Value
 
 """
-class LinearBetaCallback(keras.callbacks.Callback):
+class LinearBetaAnneal(keras.callbacks.Callback):
     def __init__(self, vae, warmup_epochs, beta_max):
         self.vae = vae
         self.warmup_epochs = warmup_epochs
@@ -28,7 +28,7 @@ class LinearBetaCallback(keras.callbacks.Callback):
 Cyclical Callback for Annealing the Beta Value
 
 """
-class CyclicalBetaCallback(keras.callbacks.Callback):
+class CyclicalBetaAnneal(keras.callbacks.Callback):
     def __init__(self, vae, cycle_length=20, warmup_ratio=0.5, beta_max=15):
         self.vae = vae
         self.cycle_length = cycle_length
@@ -83,12 +83,14 @@ class BetaVAE(keras.Model):
             z_mean, z_logvar, z = self.encoder(data)
             reconstruction = self.decoder(z)
 
-            recon_loss = tf.reduce_mean(
-                tf.reduce_sum(tf.square(data - reconstruction), axis=1)
+            recon_loss = tf.reduce_sum(
+                tf.reduce_mean(
+                    tf.square(data - reconstruction), axis=0
+                )
             )
 
-            kl_loss = -0.5 * tf.reduce_mean(
-                tf.reduce_sum(1 + z_logvar - tf.square(z_mean) - tf.exp(z_logvar), axis=1)
+            kl_loss =  tf.reduce_sum(
+                -0.5 * (1 + z_logvar - tf.square(z_mean) - tf.exp(z_logvar)), axis=0
             )
 
             total_loss = recon_loss + self.beta * kl_loss
@@ -113,11 +115,11 @@ class BetaVAE(keras.Model):
         reconstruction = self.decoder(z, training=False)
 
         recon_loss = tf.reduce_mean(
-            tf.reduce_sum(tf.square(data - reconstruction), axis=1)
+            tf.reduce_sum(tf.square(data - reconstruction)), axis=0
         )
 
         kl_loss = -0.5 * tf.reduce_mean(
-            tf.reduce_sum(1 + z_logvar - tf.square(z_mean) - tf.exp(z_logvar), axis=1)
+            tf.reduce_sum(1 + z_logvar - tf.square(z_mean) - tf.exp(z_logvar), axis=0)
         )
 
         total_loss = recon_loss + self.beta * kl_loss
@@ -280,16 +282,16 @@ betaVAE_validationData = validation_df[wavenumbers]
 input_dim = len(wavenumbers)
 output_dim = input_dim
 
-batch = 128
+batch = 256
 
-hidden_dim1 = 128
+hidden_dim1 = 256
 hidden_dim2 = 128
 
-latent_dim = 3
+latent_dim = 8
 
-beta = 30
+beta = 50
 
-epochs = 300
+epochs = 100
 
 trainingArray = np.asarray(betaVAE_trainingData.values, dtype=np.float32)
 validationArray = np.asarray(betaVAE_validationData.values, dtype=np.float32)
@@ -304,7 +306,7 @@ Build the Encoder
 
 """
 input = keras.Input(shape=input_dim, name='spectra_input') 
-x = layers.GaussianNoise(0.05)(input)
+x = layers.GaussianNoise(0.005)(input)
 x = layers.Dense(hidden_dim1, activation='relu')(input) 
 x = layers.Dense(hidden_dim2, activation='relu')(x) 
 z_mean = layers.Dense(latent_dim, name='z_mean')(x) 
@@ -333,7 +335,7 @@ vae = BetaVAE(encoder, decoder, beta)
 
 vae.compile(optimizer=keras.optimizers.Adam(learning_rate=1e-4), loss='mse', metrics=['mse'])
 
-vae.fit(trainingArray, trainingArray, epochs=epochs, batch_size=batch, callbacks=[CyclicalBetaCallback(vae, cycle_length=30, beta_max=beta)])
+vae.fit(trainingArray, trainingArray, epochs=epochs, batch_size=batch, callbacks=[LinearBetaAnneal(vae, warmup_epochs=30, beta_max=beta)])
 
 """
 Print the KL divergence for each latent dimension on the validation data
@@ -384,7 +386,7 @@ if saved_encoder is not None and saved_decoder is not None:
     for i, kl in enumerate(kl_per_dim):
         print(f"Latent {i} KL: {kl:.3f}")
 
-    indices_of_largest = np.argsort(kl_per_dim)[-3:]
+    indices_of_largest = np.argsort(kl_per_dim)[-3::]
 
     print("Three largest KL divergences:", indices_of_largest)
 
