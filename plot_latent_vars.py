@@ -31,11 +31,11 @@ def plot_label_clusters(encoder, data, labels=None):
     plt.ylabel("z[1]")
     plt.show()
 
-#plot_label_clusters(encoder, test_array)
+plot_label_clusters(encoder, test_array)
 
 def plot_latent_traversal(decoder, encoder, data, latent_dim, n_steps=10, range_min=-3, range_max=3):
     # Select a random sample from the data
-    sample = data[0:-1]
+    sample = data
     z_mean, _, _ = encoder(sample)
     z_mean = z_mean.numpy()
 
@@ -54,7 +54,7 @@ def plot_latent_traversal(decoder, encoder, data, latent_dim, n_steps=10, range_
 
             # Decode the modified latent vector
             reconstructed = decoder(tf.convert_to_tensor(z_traversal, dtype=tf.float32))
-            reconstructed = np.mean(reconstructed, axis=0)[::-1]
+            reconstructed = np.mean(reconstructed, axis=0)
 
             # Plot the reconstructed spectrum
             if dim < latent_dim-1:
@@ -64,11 +64,11 @@ def plot_latent_traversal(decoder, encoder, data, latent_dim, n_steps=10, range_
                 axes[dim].set_xticks([])
 
             else:
-                axes[dim].plot(frequencies, reconstructed)
+                axes[dim].plot(frequencies[::-1], reconstructed[::-1])
                 axes[dim].set_title(f"Dim {dim+1} Traversal")
                 axes[dim].set_yticks([])
 
     plt.show()
 
 
-plot_latent_traversal(decoder, encoder, test_array, latent_dim=3, n_steps=10, range_min=0, range_max=1e6)
+plot_latent_traversal(decoder, encoder, test_array, latent_dim=3, n_steps=10, range_min=-1e6, range_max=1e6)
