@@ -58,13 +58,13 @@ def plot_latent_traversal(decoder, encoder, data, latent_dim, n_steps=10, range_
 
             # Plot the reconstructed spectrum
             if dim < latent_dim-1:
-                axes[dim].plot(frequencies, reconstructed)
+                axes[dim].plot(frequencies, reconstructed, cmap='viridis')
                 axes[dim].set_title(f"Dim {dim+1} Traversal")
                 axes[dim].set_yticks([])
                 axes[dim].set_xticks([])
 
             else:
-                axes[dim].plot(frequencies[::-1], reconstructed[::-1])
+                axes[dim].plot(frequencies[::-1], reconstructed[::-1], cmap='viridis')
                 axes[dim].set_title(f"Dim {dim+1} Traversal")
                 axes[dim].set_yticks([])
 
