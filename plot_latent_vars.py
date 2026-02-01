@@ -25,7 +25,7 @@ def plot_label_clusters(encoder, data, labels=None):
     # display a 2D plot of the digit classes in the latent space
     z_mean, _, _ = encoder(data)
     plt.figure(figsize=(12, 10))
-    plt.scatter(z_mean[:, 0], z_mean[:, 1], c= labels, cmap='viridis')
+    plt.scatter(z_mean[:, 0], z_mean[:, 1])
     plt.colorbar()
     plt.xlabel("z[0]")
     plt.ylabel("z[1]")
@@ -58,13 +58,13 @@ def plot_latent_traversal(decoder, encoder, data, latent_dim, n_steps=10, range_
 
             # Plot the reconstructed spectrum
             if dim < latent_dim-1:
-                axes[dim].plot(frequencies, reconstructed, cmap='viridis')
+                axes[dim].plot(frequencies[::-1], reconstructed[::-1])
                 axes[dim].set_title(f"Dim {dim+1} Traversal")
                 axes[dim].set_yticks([])
                 axes[dim].set_xticks([])
 
             else:
-                axes[dim].plot(frequencies[::-1], reconstructed[::-1], cmap='viridis')
+                axes[dim].plot(frequencies[::-1], reconstructed[::-1])
                 axes[dim].set_title(f"Dim {dim+1} Traversal")
                 axes[dim].set_yticks([])
 
