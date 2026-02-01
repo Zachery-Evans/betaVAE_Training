@@ -7,6 +7,7 @@ import numpy as np
 import tensorflow as tf
 import keras
 from keras import layers
+from sklearn.model_selection import train_test_split
 from spectrum_preprocessing import roundWavenumbers, distribution_Selection, pipeline
 import matplotlib.pyplot as plt
 
@@ -15,13 +16,13 @@ Linear Callback for Annealing the Beta Value
 
 """
 class LinearBetaAnneal(keras.callbacks.Callback):
-    def __init__(self, vae, warmup_epochs, beta_max):
+    def __init__(self, vae, warmup_epochs=10, beta_max=15):
         self.vae = vae
         self.warmup_epochs = warmup_epochs
         self.beta_max = beta_max
 
     def on_epoch_begin(self, epoch, logs=None):
-        self.vae.beta = self.beta_max * min(1.0, epoch / self.warmup_epochs)
+        vae.beta.assign(self.beta_max * min(1.0 , epoch / self.warmup_epochs))
 
 
 """
@@ -38,7 +39,8 @@ class CyclicalBetaAnneal(keras.callbacks.Callback):
     def on_epoch_begin(self, epoch, logs=None):
         cycle_pos = epoch % self.cycle_length
         warmup_epochs = int(self.cycle_length * self.warmup_ratio)
-        self.vae.beta = self.beta_max * min(1.0, cycle_pos / warmup_epochs)
+        vae.beta.assign(self.beta_max * min(1.0, cycle_pos / warmup_epochs))
+        
 
 """
 Reparameterization 
@@ -61,37 +63,56 @@ class BetaVAE(keras.Model):
         super().__init__(**kwargs)
         self.encoder = encoder # ENCODER HAS THE SAMPLING LAYER INSIDE
         self.decoder = decoder
-        self.beta = beta
+        self.beta = tf.Variable(beta, trainable=False, dtype=tf.float32)
 
         # Trackers for the total, reconstruction, and KL losses
         self.total_loss_tracker = keras.metrics.Mean(name="total_loss")
         self.recon_loss_tracker = keras.metrics.Mean(name="recon_loss")
         self.kl_loss_tracker = keras.metrics.Mean(name="kl_loss")
 
+    @tf.function
     def call(self,data):
         z_mean, z_logvar, z = self.encoder(data)
         reconstruction = self.decoder(z)
         return reconstruction
     
+    @tf.function
     def train_step(self, data):
 
         if isinstance(data, tuple):
             data = data[0]   # keep only x
-
+        
         with tf.GradientTape() as tape:
             
             z_mean, z_logvar, z = self.encoder(data)
             reconstruction = self.decoder(z)
 
-            recon_loss = tf.reduce_sum(
-                tf.reduce_mean(
-                    tf.square(data - reconstruction), axis=0
+            recon_loss = tf.reduce_mean(
+                tf.reduce_sum(
+                    tf.square(data - reconstruction), axis=1
                 )
             )
 
-            kl_loss =  tf.reduce_sum(
-                -0.5 * (1 + z_logvar - tf.square(z_mean) - tf.exp(z_logvar)), axis=0
+            """
+            KL loss per batch vertsion of KL loss
+
+            """
+            kl_loss =  -0.5 *tf.reduce_mean(
+                 tf.reduce_sum((1 + z_logvar - tf.square(z_mean) - tf.exp(z_logvar)), axis=1)
             )
+
+            """
+            KL loss per dimension version of KL loss
+
+            kl__loss_per_dim = 0.5 * tf.reduce_mean(
+                z_mean**2 + tf.exp(z_logvar) - z_logvar - 1,
+                axis=0
+            )
+
+            kl_loss = tf.reduce_sum(
+                tf.where(kl__loss_per_dim > 5.0, kl__loss_per_dim, 0.0)
+            )
+            """
 
             total_loss = recon_loss + self.beta * kl_loss
 
@@ -108,32 +129,41 @@ class BetaVAE(keras.Model):
         }
     
     def test_step(self, data):
+
         if isinstance(data, tuple):
             data = data[0]
 
+        # Forward pass
         z_mean, z_logvar, z = self.encoder(data, training=False)
         reconstruction = self.decoder(z, training=False)
 
+        # Reconstruction loss (same as train_step)
         recon_loss = tf.reduce_mean(
-            tf.reduce_sum(tf.square(data - reconstruction)), axis=0
+            tf.reduce_sum(tf.square(data - reconstruction), axis=1)
         )
 
-        kl_loss = -0.5 * tf.reduce_mean(
-            tf.reduce_sum(1 + z_logvar - tf.square(z_mean) - tf.exp(z_logvar), axis=0)
+        # KL per dimension (batch-averaged)
+        kl_per_dim = 0.5 * tf.reduce_mean(
+            z_mean**2 + tf.exp(z_logvar) - z_logvar - 1,
+            axis=0
         )
 
+        # Total KL
+        kl_loss = tf.reduce_sum(kl_per_dim)
+
+        # Total loss
         total_loss = recon_loss + self.beta * kl_loss
 
+        # Update metrics
         self.total_loss_tracker.update_state(total_loss)
         self.recon_loss_tracker.update_state(recon_loss)
         self.kl_loss_tracker.update_state(kl_loss)
 
         return {
-            "total_loss": total_loss,
-            "reconstruction_loss": recon_loss,
-            "kl_loss": kl_loss,
+            "total_loss": self.total_loss_tracker.result(),
+            "reconstruction_loss": self.recon_loss_tracker.result(),
+            "kl_loss": self.kl_loss_tracker.result(),
         }
-
 
     @property
     def metrics(self):
@@ -154,7 +184,7 @@ class BetaVAE(keras.Model):
 Load and Format the VALIDATION data 
 
 """
-stdDevs = 2
+stdDevs = 3
 print("Loading and preprocessing validation data...")
 if not os.path.exists('./interpolated_validation_data.csv'):
     validation_df = pd.read_csv('./spectral_data/SMP65#013 35d 920um.csv', low_memory=False, skiprows=[1,2])
@@ -249,6 +279,7 @@ if not os.path.exists('./interpolated_training_data.csv'):
     interpRawTrainingDataframe = pd.concat(interpDataFramelist, ignore_index=True)
     interpDataFramelist = None # Clear memory
     interpRawTrainingDataframe.to_csv("interpolated_training_data.csv", index=False)
+    frequencies = interpRawTrainingDataframe.columns.astype(float)
 
     print("Data preprocessing and interpolation complete.")
 
@@ -256,45 +287,18 @@ else:
     interpRawTrainingDataframe = pd.read_csv("interpolated_training_data.csv", low_memory=False)
     frequencies = interpRawTrainingDataframe.columns.astype(float)
 
-
 """
-K-fold Validation
+Prepare the training and validation data
 
-*** Need to rework this section to properly implement k-fold validation for the interpolated data ***
-
-unique_samples = rawTrainingDataframe["Sample Name"].unique()
-n_folds = 5
-
-fold_map = {}
-for i, sid in enumerate(unique_samples):
-    fold_map[sid] = i % n_folds
-
-rawTrainingDataframe["fold"] = rawTrainingDataframe["Sample Name"].map(fold_map)
-"""
-
-
-"""
-Initialize the model, train the model and save. 
 """
 wavenumbers = [str(wavenumber) for wavenumber in sorted(frequencies)]
 betaVAE_trainingData = interpRawTrainingDataframe[wavenumbers]
 betaVAE_validationData = validation_df[wavenumbers]
-input_dim = len(wavenumbers)
-output_dim = input_dim
-
-batch = 256
-
-hidden_dim1 = 256
-hidden_dim2 = 128
-
-latent_dim = 8
-
-beta = 50
-
-epochs = 100
 
 trainingArray = np.asarray(betaVAE_trainingData.values, dtype=np.float32)
 validationArray = np.asarray(betaVAE_validationData.values, dtype=np.float32)
+
+X_train, X_test = train_test_split(trainingArray, train_size=0.8)
 
 interpRawValidationDataframe = None # Clear memory
 validation_df = None # Clear memory
@@ -302,11 +306,30 @@ betaVAE_trainingData = None # Clear memory
 betaVAE_validationData = None # Clear memory
 
 """
+Define the model parameters
+
+"""
+input_dim = len(wavenumbers)
+output_dim = input_dim
+
+batch = 16
+
+hidden_dim1 = 256
+hidden_dim2 = 256
+
+latent_dim = 16
+
+beta = 10
+
+epochs = 200
+
+
+"""
 Build the Encoder
 
 """
 input = keras.Input(shape=input_dim, name='spectra_input') 
-x = layers.GaussianNoise(0.005)(input)
+#x = layers.GaussianNoise(0.005)(input)
 x = layers.Dense(hidden_dim1, activation='relu')(input) 
 x = layers.Dense(hidden_dim2, activation='relu')(x) 
 z_mean = layers.Dense(latent_dim, name='z_mean')(x) 
@@ -333,32 +356,31 @@ Build the VAE Model and Train
 """
 vae = BetaVAE(encoder, decoder, beta)
 
-vae.compile(optimizer=keras.optimizers.Adam(learning_rate=1e-4), loss='mse', metrics=['mse'])
+vae.compile(optimizer=keras.optimizers.Adam(learning_rate=1e-4))
 
-vae.fit(trainingArray, trainingArray, epochs=epochs, batch_size=batch, callbacks=[LinearBetaAnneal(vae, warmup_epochs=30, beta_max=beta)])
+#vae.fit(trainingArray, trainingArray, epochs=epochs, batch_size=batch, callbacks=[LinearBetaAnneal(vae, warmup_epochs=30, beta_max=beta)])
+
+earlyStopping = keras.callbacks.EarlyStopping(monitor='val_total_loss', patience=5)
+vae.fit(X_train, 
+        validation_data=(X_test,), 
+        epochs=epochs, 
+        batch_size=batch, 
+        callbacks=[earlyStopping, 
+                   LinearBetaAnneal(vae, warmup_epochs=20, beta_max=beta)]
+        )
 
 """
 Print the KL divergence for each latent dimension on the validation data
 
 """
-z_mean, z_log_var, _ = encoder(trainingArray, training=False)
+z_mean, z_logvar, _ = encoder(trainingArray, training=False)
 print("Z Mean shape:", z_mean.shape)
-print("Z Log Var shape:", z_log_var.shape)
-
-kl_per_dim = 0.5 * np.mean(
-    z_mean**2 + np.exp(z_log_var) - z_log_var - 1,
-    axis=0
-)
-
-for i, kl in enumerate(kl_per_dim):
-    print(f"Latent {i+1} KL: {kl:.3f}")
-
+print("Z Log Var shape:", z_logvar.shape)
 
 """
 Save the model and reload to test that it saved correctly
 
 """
-
 #tf.saved_model.save(vae, "./new_vae/")
 tf.saved_model.save(encoder, './new_encoder/')
 tf.saved_model.save(decoder, './new_decoder/')
@@ -373,22 +395,26 @@ saved_decoder = tf.saved_model.load("./new_decoder/")
 if saved_encoder is not None and saved_decoder is not None:
     print("All models loaded successfully!")
 
-    z_mean, z_log_var, _ = saved_encoder(trainingArray, training=False)
+    z_mean, z_logvar, _ = saved_encoder(trainingArray, training=False)
     #z_mean, z_log_var, _ = encoder(test_array, training=False)
     print("Z Mean shape:", z_mean.shape)
-    print("Z Log Var shape:", z_log_var.shape)
+    print("Z Log Var shape:", z_logvar.shape)
 
     kl_per_dim = 0.5 * np.mean(
-        z_mean**2 + np.exp(z_log_var) - z_log_var - 1,
-        axis=0
+        z_mean**2 + np.exp(z_logvar) - z_logvar - 1,
+        axis = 0
     )
 
-    for i, kl in enumerate(kl_per_dim):
-        print(f"Latent {i} KL: {kl:.3f}")
+    kl_total = np.sum(kl_per_dim)
+    kl_percent = kl_per_dim / kl_total * 100
 
-    indices_of_largest = np.argsort(kl_per_dim)[-3::]
+    for i, kl in enumerate(kl_percent):
+        print(f"Latent {i} KL(%): {kl:.3f}")
+
+    indices_of_largest = (np.argsort(kl_per_dim)[-3::])[::-1]
 
     print("Three largest KL divergences:", indices_of_largest)
+    print("Total KL divergence:", kl_total)
 
     saved_encoder = None
     saved_decoder = None
