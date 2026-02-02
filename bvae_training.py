@@ -69,6 +69,14 @@ class BetaVAE(keras.Model):
         self.total_loss_tracker = keras.metrics.Mean(name="total_loss")
         self.recon_loss_tracker = keras.metrics.Mean(name="recon_loss")
         self.kl_loss_tracker = keras.metrics.Mean(name="kl_loss")
+    
+    @property
+    def metrics(self):
+        return [
+            self.total_loss_tracker,
+            self.recon_loss_tracker,
+            self.kl_loss_tracker,
+        ]
 
     @tf.function
     def call(self,data):
@@ -89,8 +97,7 @@ class BetaVAE(keras.Model):
 
             recon_loss = tf.reduce_mean(
                 tf.reduce_sum(
-                    tf.square(data - reconstruction), axis=1
-                )
+                    tf.square(data - reconstruction), axis=1) / tf.cast(tf.shape(data)[1], tf.float32)
             )
 
             """
@@ -139,7 +146,7 @@ class BetaVAE(keras.Model):
 
         # Reconstruction loss (same as train_step)
         recon_loss = tf.reduce_mean(
-            tf.reduce_sum(tf.square(data - reconstruction), axis=1)
+            tf.reduce_sum(tf.square(data - reconstruction), axis=1) / tf.cast(tf.shape(data)[1], tf.float32)
         )
 
         # KL per dimension (batch-averaged)
@@ -165,26 +172,13 @@ class BetaVAE(keras.Model):
             "kl_loss": self.kl_loss_tracker.result(),
         }
 
-    @property
-    def metrics(self):
-        return [
-            self.total_loss_tracker,
-            self.recon_loss_tracker,
-            self.kl_loss_tracker,
-        ]
-    
-    def get_config(self):
-        config = super().get_config()
-        config.update({
-            "beta": self.beta,
-        })
-        return config
+
 
 """
 Load and Format the VALIDATION data 
 
 """
-stdDevs = 3
+stdDevs = 2
 print("Loading and preprocessing validation data...")
 if not os.path.exists('./interpolated_validation_data.csv'):
     validation_df = pd.read_csv('./spectral_data/SMP65#013 35d 920um.csv', low_memory=False, skiprows=[1,2])
@@ -312,14 +306,14 @@ Define the model parameters
 input_dim = len(wavenumbers)
 output_dim = input_dim
 
-batch = 16
+batch = 32
 
-hidden_dim1 = 256
-hidden_dim2 = 256
+hidden_dim1 = 128
+hidden_dim2 = 128
 
 latent_dim = 16
 
-beta = 10
+beta = 25
 
 epochs = 200
 
@@ -334,7 +328,7 @@ x = layers.Dense(hidden_dim1, activation='relu')(input)
 x = layers.Dense(hidden_dim2, activation='relu')(x) 
 z_mean = layers.Dense(latent_dim, name='z_mean')(x) 
 z_logvar = layers.Dense(latent_dim, name='z_logvar')(x) 
-z_logvar = tf.clip_by_value(z_logvar, -10, 10)
+z_logvar = tf.clip_by_value(z_logvar, -12, 12)
 z = Sampling()([z_mean, z_logvar])
 encoder = keras.Model(inputs=input, outputs=[z_mean, z_logvar, z], name='encoder')
 encoder.summary()
@@ -356,7 +350,7 @@ Build the VAE Model and Train
 """
 vae = BetaVAE(encoder, decoder, beta)
 
-vae.compile(optimizer=keras.optimizers.Adam(learning_rate=1e-4))
+vae.compile(optimizer=keras.optimizers.Adam(learning_rate=1e-5, epsilon=1e-6))
 
 #vae.fit(trainingArray, trainingArray, epochs=epochs, batch_size=batch, callbacks=[LinearBetaAnneal(vae, warmup_epochs=30, beta_max=beta)])
 
@@ -373,7 +367,7 @@ vae.fit(X_train,
 Print the KL divergence for each latent dimension on the validation data
 
 """
-z_mean, z_logvar, _ = encoder(trainingArray, training=False)
+z_mean, z_logvar, _ = encoder(X_train, training=False)
 print("Z Mean shape:", z_mean.shape)
 print("Z Log Var shape:", z_logvar.shape)
 
@@ -395,7 +389,7 @@ saved_decoder = tf.saved_model.load("./new_decoder/")
 if saved_encoder is not None and saved_decoder is not None:
     print("All models loaded successfully!")
 
-    z_mean, z_logvar, _ = saved_encoder(trainingArray, training=False)
+    z_mean, z_logvar, _ = saved_encoder(X_train, training=False)
     #z_mean, z_log_var, _ = encoder(test_array, training=False)
     print("Z Mean shape:", z_mean.shape)
     print("Z Log Var shape:", z_logvar.shape)
@@ -411,7 +405,7 @@ if saved_encoder is not None and saved_decoder is not None:
     for i, kl in enumerate(kl_percent):
         print(f"Latent {i} KL(%): {kl:.3f}")
 
-    indices_of_largest = (np.argsort(kl_per_dim)[-3::])[::-1]
+    indices_of_largest = (np.argsort(kl_per_dim)[-5::])[::-1]
 
     print("Three largest KL divergences:", indices_of_largest)
     print("Total KL divergence:", kl_total)
