@@ -8,6 +8,7 @@ import tensorflow as tf
 import keras
 from keras import layers
 from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import MinMaxScaler
 from spectrum_preprocessing import roundWavenumbers, distribution_Selection, pipeline
 import matplotlib.pyplot as plt
 
@@ -16,6 +17,13 @@ Linear Callback for Annealing the Beta Value
 
 """
 class LinearBetaAnneal(keras.callbacks.Callback):
+    """
+    Anneals the beta variable in betaVAE in a linear motion:
+    beta begins at zero, then has a warmup period given by the programmer, 
+    then once it reaches the maximum allowed beta value, maintains its value
+    for the remainder of the training epochs. 
+    
+    """
     def __init__(self, vae, warmup_epochs=10, beta_max=15):
         self.vae = vae
         self.warmup_epochs = warmup_epochs
@@ -30,6 +38,13 @@ Cyclical Callback for Annealing the Beta Value
 
 """
 class CyclicalBetaAnneal(keras.callbacks.Callback):
+    """
+    Anneals the beta variable in betaVAE in a sawtooth motion: 
+    beta begins at zero, then has a warmup period of (by default) half the cycle length,
+    holds the maximum beta for (by default) half of a cycle, and then returns beta to zero to repeat 
+    the process as many times as possible for given epochs.  
+    
+    """
     def __init__(self, vae, cycle_length=20, warmup_ratio=0.5, beta_max=15):
         self.vae = vae
         self.cycle_length = cycle_length
@@ -41,6 +56,19 @@ class CyclicalBetaAnneal(keras.callbacks.Callback):
         warmup_epochs = int(self.cycle_length * self.warmup_ratio)
         vae.beta.assign(self.beta_max * min(1.0, cycle_pos / warmup_epochs))
         
+"""
+Capacity Annealing
+
+"""
+class CapacityAnneal(tf.keras.optimizers.schedules.LearningRateSchedule):
+    def __init__(self, c_max, n_steps):
+        self.c_max = tf.constant(c_max, dtype=tf.float32)
+        self.n_steps = tf.constant(n_steps, dtype=tf.float32)
+
+    def __call__(self, step):
+        step = tf.cast(step, tf.float32)
+        return tf.minimum(self.c_max, self.c_max * step / self.n_steps)
+
 
 """
 Reparameterization 
@@ -51,19 +79,36 @@ class Sampling(keras.layers.Layer):
 
     def call(self, inputs):
         z_mean, z_log_var = inputs
-        epsilon = tf.random.normal(shape=tf.shape(z_mean))
+        epsilon = tf.random.normal(shape=tf.shape(z_mean), seed=1238323)
         return z_mean + tf.exp(0.5 * z_log_var) * epsilon
 
 """
 BetaVAE Model
 
 """
+def calculate_kl_divergence(z_mean, z_logvar):
+    # shape: (batch, latent_dim)
+    kl_per_dim = 0.5 * (
+        tf.square(z_mean) +
+        tf.exp(z_logvar) -
+        z_logvar - 1.0
+    )
+    # shape: (batch,)
+    kl_per_sample = tf.reduce_sum(kl_per_dim, axis=1)
+    # scalar
+    kl_mean = tf.reduce_mean(kl_per_sample)
+
+    return kl_mean, kl_per_dim
+
 class BetaVAE(keras.Model):
-    def __init__(self, encoder, decoder, beta, **kwargs):
+    def __init__(self, encoder, decoder, beta, c_max, c_steps, **kwargs):
         super().__init__(**kwargs)
         self.encoder = encoder # ENCODER HAS THE SAMPLING LAYER INSIDE
         self.decoder = decoder
         self.beta = tf.Variable(beta, trainable=False, dtype=tf.float32)
+
+        self.capacity_annealer = CapacityAnneal(c_max=c_max, n_steps=c_steps)
+        self.step_counter = tf.Variable(0, trainable=False, dtype=tf.int64)
 
         # Trackers for the total, reconstruction, and KL losses
         self.total_loss_tracker = keras.metrics.Mean(name="total_loss")
@@ -95,44 +140,35 @@ class BetaVAE(keras.Model):
             z_mean, z_logvar, z = self.encoder(data)
             reconstruction = self.decoder(z)
 
+            capacity = self.capacity_annealer(self.step_counter)
+
             recon_loss = tf.reduce_mean(
                 tf.reduce_sum(
-                    tf.square(data - reconstruction), axis=1) / tf.cast(tf.shape(data)[1], tf.float32)
+                    tf.square(data - reconstruction), axis=1) #/ tf.cast(tf.shape(data)[1], tf.float32)
             )
 
             """
             KL loss per batch vertsion of KL loss
 
             """
-            kl_loss =  -0.5 *tf.reduce_mean(
-                 tf.reduce_sum((1 + z_logvar - tf.square(z_mean) - tf.exp(z_logvar)), axis=1)
-            )
+            kl, _ = calculate_kl_divergence(z_mean, z_logvar)
 
-            """
-            KL loss per dimension version of KL loss
+            kl_loss = self.beta * tf.abs(kl - capacity)
 
-            kl__loss_per_dim = 0.5 * tf.reduce_mean(
-                z_mean**2 + tf.exp(z_logvar) - z_logvar - 1,
-                axis=0
-            )
-
-            kl_loss = tf.reduce_sum(
-                tf.where(kl__loss_per_dim > 5.0, kl__loss_per_dim, 0.0)
-            )
-            """
-
-            total_loss = recon_loss + self.beta * kl_loss
+            total_loss = recon_loss + kl_loss
 
         grads = tape.gradient(total_loss, self.trainable_weights)
         self.optimizer.apply_gradients(zip(grads, self.trainable_weights))
         self.total_loss_tracker.update_state(total_loss)
         self.recon_loss_tracker.update_state(recon_loss)
-        self.kl_loss_tracker.update_state(kl_loss)
+        self.kl_loss_tracker.update_state(kl)
+        self.step_counter.assign_add(1)
 
         return  {
         "total_loss": total_loss,
         "reconstruction_loss": recon_loss,
-        "kl_loss": kl_loss,
+        "kl_loss": kl,
+        "capacity": capacity
         }
     
     def test_step(self, data):
@@ -146,17 +182,17 @@ class BetaVAE(keras.Model):
 
         # Reconstruction loss (same as train_step)
         recon_loss = tf.reduce_mean(
-            tf.reduce_sum(tf.square(data - reconstruction), axis=1) / tf.cast(tf.shape(data)[1], tf.float32)
+            tf.reduce_sum(
+                tf.square(data - reconstruction), axis=1) #/ tf.cast(tf.shape(data)[1], tf.float32)
         )
 
-        # KL per dimension (batch-averaged)
-        kl_per_dim = 0.5 * tf.reduce_mean(
-            z_mean**2 + tf.exp(z_logvar) - z_logvar - 1,
-            axis=0
-        )
+        """
+        KL loss per batch vertsion of KL loss
 
-        # Total KL
-        kl_loss = tf.reduce_sum(kl_per_dim)
+        """
+        kl_loss =  tf.reduce_mean(
+                tf.reduce_sum(0.5 * (1 + z_logvar - tf.square(z_mean) - tf.exp(z_logvar)), axis=1)
+        )
 
         # Total loss
         total_loss = recon_loss + self.beta * kl_loss
@@ -171,8 +207,6 @@ class BetaVAE(keras.Model):
             "reconstruction_loss": self.recon_loss_tracker.result(),
             "kl_loss": self.kl_loss_tracker.result(),
         }
-
-
 
 """
 Load and Format the VALIDATION data 
@@ -292,7 +326,12 @@ betaVAE_validationData = validation_df[wavenumbers]
 trainingArray = np.asarray(betaVAE_trainingData.values, dtype=np.float32)
 validationArray = np.asarray(betaVAE_validationData.values, dtype=np.float32)
 
-X_train, X_test = train_test_split(trainingArray, train_size=0.8)
+scaler = MinMaxScaler(feature_range=(0,1))
+
+normalizedTrainingArray = scaler.fit_transform(trainingArray)
+normalizedValidationArray = scaler.fit_transform(validationArray)
+
+X_train, X_test = train_test_split(normalizedTrainingArray, train_size=0.8)
 
 interpRawValidationDataframe = None # Clear memory
 validation_df = None # Clear memory
@@ -306,7 +345,7 @@ Define the model parameters
 input_dim = len(wavenumbers)
 output_dim = input_dim
 
-batch = 32
+batch = 16
 
 hidden_dim1 = 128
 hidden_dim2 = 128
@@ -315,20 +354,19 @@ latent_dim = 16
 
 beta = 25
 
-epochs = 200
-
+epochs = 10
 
 """
 Build the Encoder
 
 """
 input = keras.Input(shape=input_dim, name='spectra_input') 
-#x = layers.GaussianNoise(0.005)(input)
+#x = layers.GaussianNoise(0.05)(input)
 x = layers.Dense(hidden_dim1, activation='relu')(input) 
 x = layers.Dense(hidden_dim2, activation='relu')(x) 
 z_mean = layers.Dense(latent_dim, name='z_mean')(x) 
 z_logvar = layers.Dense(latent_dim, name='z_logvar')(x) 
-z_logvar = tf.clip_by_value(z_logvar, -12, 12)
+z_logvar = tf.clip_by_value(z_logvar, -10, 10)
 z = Sampling()([z_mean, z_logvar])
 encoder = keras.Model(inputs=input, outputs=[z_mean, z_logvar, z], name='encoder')
 encoder.summary()
@@ -348,20 +386,20 @@ decoder.summary()
 Build the VAE Model and Train
 
 """
-vae = BetaVAE(encoder, decoder, beta)
+vae = BetaVAE(encoder, decoder, beta, latent_dim, c_steps=1e5)
 
-vae.compile(optimizer=keras.optimizers.Adam(learning_rate=1e-5, epsilon=1e-6))
+vae.compile(optimizer=keras.optimizers.Adam(learning_rate=1e-4))
 
 #vae.fit(trainingArray, trainingArray, epochs=epochs, batch_size=batch, callbacks=[LinearBetaAnneal(vae, warmup_epochs=30, beta_max=beta)])
 
-earlyStopping = keras.callbacks.EarlyStopping(monitor='val_total_loss', patience=5)
+earlyStopping = keras.callbacks.EarlyStopping(monitor='val_total_loss', patience=10)
 vae.fit(X_train, 
-        validation_data=(X_test,), 
-        epochs=epochs, 
-        batch_size=batch, 
-        callbacks=[earlyStopping, 
-                   LinearBetaAnneal(vae, warmup_epochs=20, beta_max=beta)]
-        )
+    validation_data=(X_test,), 
+    epochs=epochs, 
+    batch_size=batch, 
+    callbacks=[earlyStopping, 
+    LinearBetaAnneal(vae, warmup_epochs=2, beta_max=beta)]
+    )
 
 """
 Print the KL divergence for each latent dimension on the validation data
