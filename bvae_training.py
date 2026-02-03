@@ -79,7 +79,7 @@ class Sampling(keras.layers.Layer):
 
     def call(self, inputs):
         z_mean, z_log_var = inputs
-        epsilon = tf.random.normal(shape=tf.shape(z_mean), seed=1238323)
+        epsilon = tf.random.normal(shape=tf.shape(z_mean), seed=1337)
         return z_mean + tf.exp(0.5 * z_log_var) * epsilon
 
 """
@@ -180,6 +180,8 @@ class BetaVAE(keras.Model):
         z_mean, z_logvar, z = self.encoder(data, training=False)
         reconstruction = self.decoder(z, training=False)
 
+        capacity = self.capacity_annealer(self.step_counter)
+
         # Reconstruction loss (same as train_step)
         recon_loss = tf.reduce_mean(
             tf.reduce_sum(
@@ -190,9 +192,11 @@ class BetaVAE(keras.Model):
         KL loss per batch vertsion of KL loss
 
         """
-        kl_loss =  tf.reduce_mean(
-                tf.reduce_sum(0.5 * (1 + z_logvar - tf.square(z_mean) - tf.exp(z_logvar)), axis=1)
-        )
+        kl, _ = calculate_kl_divergence(z_mean, z_logvar)
+
+        kl_loss = tf.abs(kl - capacity)
+
+        total_loss = recon_loss + kl_loss
 
         # Total loss
         total_loss = recon_loss + self.beta * kl_loss
@@ -200,7 +204,7 @@ class BetaVAE(keras.Model):
         # Update metrics
         self.total_loss_tracker.update_state(total_loss)
         self.recon_loss_tracker.update_state(recon_loss)
-        self.kl_loss_tracker.update_state(kl_loss)
+        self.kl_loss_tracker.update_state(kl)
 
         return {
             "total_loss": self.total_loss_tracker.result(),
@@ -331,7 +335,7 @@ scaler = MinMaxScaler(feature_range=(0,1))
 normalizedTrainingArray = scaler.fit_transform(trainingArray)
 normalizedValidationArray = scaler.fit_transform(validationArray)
 
-X_train, X_test = train_test_split(normalizedTrainingArray, train_size=0.8)
+X_train, X_val = train_test_split(trainingArray, train_size=0.8)
 
 interpRawValidationDataframe = None # Clear memory
 validation_df = None # Clear memory
@@ -345,23 +349,23 @@ Define the model parameters
 input_dim = len(wavenumbers)
 output_dim = input_dim
 
-batch = 16
+batch = 128
 
-hidden_dim1 = 128
-hidden_dim2 = 128
+hidden_dim1 = 256
+hidden_dim2 = 256
 
 latent_dim = 16
 
 beta = 25
 
-epochs = 10
+epochs = 100
 
 """
 Build the Encoder
 
 """
 input = keras.Input(shape=input_dim, name='spectra_input') 
-#x = layers.GaussianNoise(0.05)(input)
+x = layers.GaussianNoise(0.05)(input)
 x = layers.Dense(hidden_dim1, activation='relu')(input) 
 x = layers.Dense(hidden_dim2, activation='relu')(x) 
 z_mean = layers.Dense(latent_dim, name='z_mean')(x) 
@@ -386,19 +390,19 @@ decoder.summary()
 Build the VAE Model and Train
 
 """
-vae = BetaVAE(encoder, decoder, beta, latent_dim, c_steps=1e5)
+vae = BetaVAE(encoder, decoder, beta, 100, c_steps=1e8)
 
 vae.compile(optimizer=keras.optimizers.Adam(learning_rate=1e-4))
 
 #vae.fit(trainingArray, trainingArray, epochs=epochs, batch_size=batch, callbacks=[LinearBetaAnneal(vae, warmup_epochs=30, beta_max=beta)])
 
-earlyStopping = keras.callbacks.EarlyStopping(monitor='val_total_loss', patience=10)
+earlyStopping = keras.callbacks.EarlyStopping(monitor='val_total_loss', patience=20)
 vae.fit(X_train, 
-    validation_data=(X_test,), 
+    validation_data=(X_val,), 
     epochs=epochs, 
     batch_size=batch, 
     callbacks=[earlyStopping, 
-    LinearBetaAnneal(vae, warmup_epochs=2, beta_max=beta)]
+    LinearBetaAnneal(vae, warmup_epochs=10, beta_max=beta)]
     )
 
 """
