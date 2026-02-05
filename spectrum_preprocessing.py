@@ -337,12 +337,12 @@ def distribution_Selection(df, distributionIdx, numberOfSigmas):
     df[distributionIdx] = df[distributionIdx].astype(float)
 
     #creating variable for the array of Polyethylene Area
-    area = df['1981.7 - 2095.8'].values
+    area = df[distributionIdx].values
 
     # Use Gaussian KDE to find the center position of the rightmost mode by creating x coords
     # and then using np.argmax to determine the point with the highest number of counts
     kde = gaussian_kde(area)
-    xs = np.linspace(area.min(), area.max(), 1000) 
+    xs = np.linspace(area.min(), area.max(), 1000)
     modePosition = xs[np.argmax(kde(xs))]
 
     # Use only the values greater than 1.5 to determine the std of the PE peaks
@@ -417,7 +417,6 @@ def pipeline(expt_wavenumber, expt_absorbance):
     carbonyl_abs = corrected2
 
     """  Uninformative region containing unchanging PE bands
-
     #apply the interpolation to the spectral window
     interpolated_wavenumber, interpolated_absorbance = sp.interpolate_spectrum(f, normalized_absorbance, 1850, 2110)
     #calculate the baseline
