@@ -88,19 +88,6 @@ class Sampling(keras.layers.Layer):
 BetaVAE Model
 
 """
-def calculate_kl_divergence(z_mean, z_logvar):
-    # shape: (batch, latent_dim)
-    kl_per_dim = 0.5 * (
-        tf.square(z_mean) +
-        tf.exp(z_logvar) -
-        z_logvar - 1.0
-    )
-    # shape: (batch,)
-    kl_per_sample = tf.reduce_sum(kl_per_dim, axis=1)
-    # scalar
-    kl_mean = tf.reduce_mean(kl_per_sample)
-
-    return kl_mean, kl_per_dim
 
 class BetaVAE(keras.Model):
     def __init__(self, encoder, decoder, beta,**kwargs):
@@ -109,112 +96,21 @@ class BetaVAE(keras.Model):
         self.decoder = decoder
         self.beta = tf.Variable(beta, trainable=False, dtype=tf.float32)
 
-        #self.capacity_annealer = CapacityAnneal(c_max=c_max, n_steps=c_steps)
-        #self.step_counter = tf.Variable(0, trainable=False, dtype=tf.int64)
-
-        # Trackers for the total, reconstruction, and KL losses
-        self.total_loss_tracker = keras.metrics.Mean(name="total_loss")
-        self.recon_loss_tracker = keras.metrics.Mean(name="recon_loss")
-        self.kl_loss_tracker = keras.metrics.Mean(name="kl_loss")
-    
-    @property
-    def metrics(self):
-        return [
-            self.total_loss_tracker,
-            self.recon_loss_tracker,
-            self.kl_loss_tracker,
-        ]
-
     @tf.function
-    def call(self,data):
+    def call(self, data):
         _, _, z = self.encoder(data)
         reconstruction = self.decoder(z)
-        return reconstruction
-    
-    @tf.function
-    def train_step(self, data):
 
-        if isinstance(data, tuple):
-            data = data[0]   # keep only x
-        
-        with tf.GradientTape() as tape:
-            
-            z_mean, z_logvar, z = self.encoder(data)
-            reconstruction = self.decoder(z)
-
-            #capacity = self.capacity_annealer(self.step_counter)
-
-            recon_loss = tf.reduce_mean(
-                tf.reduce_sum(
-                    tf.square(data - reconstruction), axis=1)
-            )
-
-            """
-            KL loss per batch vertsion of KL loss
-
-            """
-            kl, _ = calculate_kl_divergence(z_mean, z_logvar)
-
-            #kl_loss = self.beta * tf.abs(kl - capacity)
-
-            total_loss = recon_loss + self.beta * kl
-
-        grads = tape.gradient(total_loss, self.trainable_weights)
-        self.optimizer.apply_gradients(zip(grads, self.trainable_weights))
-        self.total_loss_tracker.update_state(total_loss)
-        self.recon_loss_tracker.update_state(recon_loss)
-        self.kl_loss_tracker.update_state(kl)
-        #self.step_counter.assign_add(1)
-
-        return  {
-        "total_loss": self.total_loss_tracker.result(),
-        "reconstruction_loss": self.recon_loss_tracker.result(),
-        "kl_loss": self.kl_loss_tracker.result(),
-        "beta": self.beta,
-        }
-    
-    @tf.function
-    def test_step(self, data):
-
-        if isinstance(data, tuple):
-            data = data[0]
-
-        # Forward pass
-        z_mean, z_logvar, z = self.encoder(data, training=False)
-        reconstruction = self.decoder(z, training=False)
-
-        #capacity = self.capacity_annealer(self.step_counter)
-
-        # Reconstruction loss (same as train_step)
-        recon_loss = tf.reduce_mean(
-            tf.reduce_sum(
-                tf.square(data - reconstruction), axis=1)
+        kl = -0.5 * tf.reduce_sum(
+            1 + z_logvar - tf.square(z_mean) - tf.exp(z_logvar),
+            axis=1
         )
+        kl_loss = tf.reduce_mean(kl)
 
-        """
-        KL loss per batch vertsion of KL loss
+        self.add_loss(self.beta * kl_loss)
+        self.add_metric(kl_loss, name="kl_loss", aggregation="mean")
 
-        """
-        kl, _ = calculate_kl_divergence(z_mean, z_logvar)
-
-        #kl_loss = tf.abs(kl - capacity)
-        kl_loss = self.beta * kl
-
-        total_loss = recon_loss + kl_loss
-
-        # Total loss
-        total_loss = recon_loss + self.beta * kl_loss
-
-        # Update metrics
-        self.total_loss_tracker.update_state(total_loss)
-        self.recon_loss_tracker.update_state(recon_loss)
-        self.kl_loss_tracker.update_state(kl)
-
-        return {
-            "total_loss": self.total_loss_tracker.result(),
-            "reconstruction_loss": self.recon_loss_tracker.result(),
-            "kl_loss": self.kl_loss_tracker.result(),
-        }
+        return reconstruction
 
 """
 Load and Format the VALIDATION data 
@@ -354,12 +250,12 @@ Define the model parameters
 input_dim = len(wavenumbers)
 output_dim = input_dim
 
-batch = 128
+batch = 32
 
 hidden_dim1 = 128
 hidden_dim2 = 128
 
-latent_dim = 8
+latent_dim = 16
 
 beta = 1
 
@@ -398,17 +294,30 @@ Build the VAE Model and Train
 #vae = BetaVAE(encoder, decoder, beta, 100, c_steps=1e5)
 vae = BetaVAE(encoder, decoder, beta)
 
-vae.compile(optimizer=keras.optimizers.Adam(learning_rate=1e-4, clipnorm=0.5))
+def reconstruction_mse(y_true, y_pred):
+    return tf.reduce_mean(tf.reduce_sum(tf.square(y_true - y_pred), axis=1))
+
+vae.compile(
+    optimizer=keras.optimizers.Adam(learning_rate=1e-3), 
+    loss=reconstruction_mse
+    )
 
 #vae.fit(trainingArray, trainingArray, epochs=epochs, batch_size=batch, callbacks=[LinearBetaAnneal(vae, warmup_epochs=30, beta_max=beta)])
 
-earlyStopping = keras.callbacks.EarlyStopping(monitor='val_total_loss', patience=20)
-vae.fit(trainingArray, 
-    #validation_data=(X_val,), 
-    epochs=epochs, 
-    #callbacks=[CyclicalBetaAnneal(vae, cycle_length=10, warmup_ratio=0.5, beta_max=beta)]
-)
+earlyStopping = keras.callbacks.EarlyStopping(monitor='val_total_loss', patience=20, restore_best_weights=True)
+betaAnnealing = CyclicalBetaAnneal(vae, cycle_length=10, warmup_ratio=0.5, beta_max=beta)
+NaNTerminate = keras.callbacks.TerminateOnNaN()
+reduceLearningRate = keras.callbacks.ReduceLROnPlateau(monitor="val_loss", factor=0.5, patience=10, min_lr=1e-5)
 
+callbacks = [earlyStopping, NaNTerminate, reduceLearningRate]
+
+vae.fit(X_train, 
+validation_data=(X_val,), 
+epochs=epochs, 
+batch_size=batch,
+callbacks=callbacks,
+verbose=1,
+)
 """
 Print the KL divergence for each latent dimension on the validation data
 
