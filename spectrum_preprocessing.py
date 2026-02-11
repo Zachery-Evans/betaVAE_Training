@@ -175,6 +175,37 @@ def integrate_peak(wavenumbers, absorbance, low=2000, high=2050):
 
     return integrated_area
 
+def cut_keep(wavenumbers, absorbances, lowerBound=898, upperBound=3998):
+    """
+    Arguments: 
+        wavenumbers {array}: -- a numpy array
+        absorbances {array}: -- a numpy array
+        lowerBound {int}: -- integer
+        upperBound {int}: -- integer
+    
+    Returns: 
+        cut_wavenumber {array}: -- a numpy array
+        cut_absorbance {array}: -- a numpy array
+
+    Selects a range of wavenumbers from a lower bound to an upper bound
+    and return two arrays, one containing the selected wavenumbers and
+    the other containing the absorbance values corresponding to those 
+    wavenumbers. 
+    
+    :param wavenumbers: Array containing all of the wavenumbers
+    :param absorbance: Array containing all of the absorbance values
+    :param lowerBound: lower bound or smallest wavenumber
+    :param upperBound: upper bound or largest wavenumber
+    """
+
+    lowerIdx = (np.abs(wavenumbers - lowerBound)).argmin()
+    upperIdx = (np.abs(wavenumbers - upperBound)).argmin()
+
+    cut_absorbances = absorbances[lowerIdx:upperIdx]
+    cut_wavenumbers = wavenumbers[lowerIdx:upperIdx]
+
+    return cut_wavenumbers, cut_absorbances
+
 def rubberband_baseline(wavenumbers, absorbance):
     """
     Calculate rubberband baseline.
@@ -386,7 +417,7 @@ def pipeline(expt_wavenumber, expt_absorbance):
     normalized_absorbance = thickness_normalizer(a, Std)
 
     #apply the interpolation to the spectral window
-    interpolated_wavenumber, interpolated_absorbance = interpolate_spectrum(f, normalized_absorbance, 898, 1400)
+    interpolated_wavenumber, interpolated_absorbance = cut_keep(f, normalized_absorbance, 898, 1400)
 
     #calculate the baseline
     baseline1 = airpls(interpolated_absorbance)
@@ -403,7 +434,7 @@ def pipeline(expt_wavenumber, expt_absorbance):
     fingerprint_abs = corrected3
     
     #apply the interpolation to the spectral window
-    interpolated_wavenumber, interpolated_absorbance = interpolate_spectrum(f, normalized_absorbance, 1520, 1800)
+    interpolated_wavenumber, interpolated_absorbance = cut_keep(f, normalized_absorbance, 1520, 1800)
     #calculate the baseline
     baseline1 = airpls(interpolated_absorbance)
 
