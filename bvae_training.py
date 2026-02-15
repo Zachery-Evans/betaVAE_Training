@@ -1,7 +1,6 @@
 import os
 os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 os.environ["KERAS BACKEND"] = "tensorflow"
-import re
 import pandas as pd
 import numpy as np
 import tensorflow as tf
@@ -56,27 +55,12 @@ class CyclicalBetaAnneal(keras.callbacks.Callback):
         warmup_epochs = int(self.cycle_length * self.warmup_ratio)
         vae.beta.assign(self.beta_max * min(1.0, cycle_pos / warmup_epochs))
         
-"""
-Capacity Annealing
-
-"""
-class CapacityAnneal(tf.keras.optimizers.schedules.LearningRateSchedule):
-    def __init__(self, c_max, n_steps):
-        self.c_max = tf.constant(c_max, dtype=tf.float32)
-        self.n_steps = tf.constant(n_steps, dtype=tf.float32)
-
-    def __call__(self, step):
-        step = tf.cast(step, tf.float32)
-        return tf.minimum(self.c_max, self.c_max * step / self.n_steps)
-
 
 """
 Reparameterization 
 
 """
-class Sampling(keras.layers.Layer):
-    """Uses (z_mean, z_log_var) to sample z, the vector encoding a digit."""
-
+class Sampling(layers.Layer):
     def call(self, inputs, training=None):
         z_mean, z_logvar = inputs
         if training:
@@ -90,202 +74,94 @@ BetaVAE Model
 """
 
 class BetaVAE(keras.Model):
-    def __init__(self, encoder, decoder, beta, **kwargs):
+    def __init__(self, encoder, decoder, beta=1.0, **kwargs):
         super().__init__(**kwargs)
-        self.encoder = encoder # ENCODER HAS THE SAMPLING LAYER INSIDE
+        self.encoder = encoder
         self.decoder = decoder
         self.beta = beta
-
-        # Trackers for the total, reconstruction, and KL losses
+        # Trackers for clean progress bars
         self.total_loss_tracker = keras.metrics.Mean(name="total_loss")
         self.recon_loss_tracker = keras.metrics.Mean(name="recon_loss")
         self.kl_loss_tracker = keras.metrics.Mean(name="kl_loss")
 
-    def call(self,data):
-        z_mean, z_logvar, z = self.encoder(data)
-        reconstruction = self.decoder(z)
-        return reconstruction
-    
+    @property
+    def metrics(self):
+        return [self.total_loss_tracker, self.recon_loss_tracker, self.kl_loss_tracker]
+
     def train_step(self, data):
-
+        # Data is usually (x, y); for VAE, we use x for both
         if isinstance(data, tuple):
-            data = data[0]   # keep only x
-
-        with tf.GradientTape() as tape:
+            data = data[0]
             
-            z_mean, z_logvar, z = self.encoder(data)
-            reconstruction = self.decoder(z)
-
+        with tf.GradientTape() as tape:
+            z_mean, z_logvar, z = self.encoder(data, training=True)
+            reconstruction = self.decoder(z, training=True)
+            
+            # Reconstruction: MSE summed over features, then averaged over batch
             recon_loss = tf.math.reduce_mean(
-                tf.math.reduce_sum(tf.square(data - reconstruction), axis=1)
+                tf.math.reduce_sum(tf.math.square(data - reconstruction), axis=1)
             )
-
-            kl_loss = -0.5 * tf.math.reduce_sum(1 + z_logvar - tf.square(z_mean) - tf.exp(z_logvar), axis=1)
-
-            kl_loss = tf.math.reduce_mean(kl_loss) 
-        
+            
+            # KL Divergence: Summed over latent dims, then averaged over batch
+            kl_loss = -0.5 * tf.math.reduce_sum(
+                1 + z_logvar - tf.math.square(z_mean) - tf.math.exp(z_logvar), axis=1
+            )
+            kl_loss = tf.math.reduce_mean(kl_loss)
+            
             total_loss = recon_loss + self.beta * kl_loss
 
         grads = tape.gradient(total_loss, self.trainable_weights)
         self.optimizer.apply_gradients(zip(grads, self.trainable_weights))
+        
         self.total_loss_tracker.update_state(total_loss)
         self.recon_loss_tracker.update_state(recon_loss)
         self.kl_loss_tracker.update_state(kl_loss)
+        return {m.name: m.result() for m in self.metrics}
 
-        return  {m.name: m.result() for m in self.metrics}
-
-    
     def test_step(self, data):
         if isinstance(data, tuple):
             data = data[0]
-
+        
         z_mean, z_logvar, z = self.encoder(data, training=False)
         reconstruction = self.decoder(z, training=False)
-
-        recon_loss = tf.math.reduce_mean(
-            tf.math.reduce_sum(tf.square(data - reconstruction), axis=1)
-        )
-
-        kl_loss = -0.5 * tf.math.reduce_sum(1 + z_logvar - tf.square(z_mean) - tf.exp(z_logvar), axis=1)
-
+        
+        recon_loss = tf.math.reduce_mean(tf.reduce_sum(tf.square(data - reconstruction), axis=1))
+        kl_loss = -0.5 * tf.math.reduce_sum(1 + z_logvar - tf.math.square(z_mean) - tf.math.exp(z_logvar), axis=1)
         kl_loss = tf.math.reduce_mean(kl_loss)
         
         total_loss = recon_loss + self.beta * kl_loss
-
+        
         self.total_loss_tracker.update_state(total_loss)
         self.recon_loss_tracker.update_state(recon_loss)
         self.kl_loss_tracker.update_state(kl_loss)
-
         return {m.name: m.result() for m in self.metrics}
-
-    @property
-    def metrics(self):
-        return [self.total_loss_tracker, self.recon_loss_tracker, self.kl_loss_tracker,]
     
     def get_config(self):
+        # Return serializable config
         config = super().get_config()
         config.update({
-            "beta": self.beta,
+            "units": self.units,
+            "activation": tf.keras.activations.serialize(self.activation)
         })
         return config
 
-"""
-Load and Format the VALIDATION data 
+    def call(self, x):
+        # Standard call returns the reconstruction
+        _, _, z = self.encoder(x)
+        return self.decoder(z)
 
-"""
-stdDevs = 2
-print("Loading and preprocessing validation data...")
-if not os.path.exists('./interpolated_validation_data.csv'):
-    validation_df = pd.read_csv('./spectral_data/SMP65#013 35d 920um.csv', low_memory=False, skiprows=[1,2])
-    validation_df = roundWavenumbers(validation_df)
-
-    last_nonwavenum_idx = validation_df.columns.get_loc('1981.7 - 2095.8') + 1
-    wavenumbers = validation_df.columns[last_nonwavenum_idx:]
-    
-    _, _, mask_selected, modePosition, areaPE = distribution_Selection(validation_df, '1981.7 - 2095.8', stdDevs)
-    validation_df = validation_df[mask_selected]
-
-    interpRawValidationDataframe = pd.DataFrame()
-    interpDataFramelist=[]
-    for index, row in validation_df.iterrows():
-        row = row[last_nonwavenum_idx:]
-
-        frequencies = row.index.to_numpy(dtype=float)
-        frequencies = frequencies[::-1]  # Reverse the order for interpolation
-        spectrum = row.to_numpy(dtype=float)
-        spectrum = spectrum[::-1]  # Reverse the order for interpolation
-        
-        interp_frequencies, interp_spectrum = pipeline(frequencies, spectrum)
-
-        interpDataFramelist.append(pd.DataFrame(data=[interp_spectrum], columns=interp_frequencies))
-
-    validation_df = pd.concat(interpDataFramelist, ignore_index=True)
-    
-    interpDataFramelist = None # Clear memory
-
-    validation_df.to_csv("interpolated_validation_data.csv", index=False)
-else:
-    validation_df = pd.read_csv("interpolated_validation_data.csv", low_memory=False)
-
-
-"""
-Load and Format the TRAINING data
-
-"""
-print("Loading and preprocessing training data...")
-if not os.path.exists('./interpolated_training_data.csv'):
-    path = './training_data/'
-    #List all of the files in the data directory.
-    allFiles = os.listdir(path)
-    # Take only the files that contain data pertaining to SMP65#010 
-    trainingFiles = [file for file in allFiles if file.endswith('.csv') and 'SMP65#010' in file and 'full width' not in file]
-
-    trainingFiles = sorted(trainingFiles, key=lambda x: int(re.search(r'(?<= )(.+?)(?=d)', x).group()))
-
-    # Read all of the data and place the dataframes into a list
-    trainingDataframeList = [pd.read_csv(path+file, low_memory=False, skiprows=[1,2]) for file in trainingFiles]
-
-    last_nonwavenum_idx = trainingDataframeList[0].columns.get_loc('1981.7 - 2095.8') + 1
-    wavenumbers = trainingDataframeList[0].columns[last_nonwavenum_idx:]
-    
-    masked_trainingDataframeList = []
-
-    for df in trainingDataframeList:
-        _, _, mask_selected, modePosition, areaPE = distribution_Selection(df, '1981.7 - 2095.8', stdDevs)
-
-        masked_trainingDataframeList.append(df[mask_selected])
-    trainingDataframeList = None # Clear memory
-
-    # Lambda function to round all of the wavenumbers so that column labels are all matching, 
-    # and then concatenate all the datasets together
-    rawTrainingDataframe = pd.concat(
-        (
-            df.rename(
-                columns=lambda c: round(float(c), 1) if c not in df.columns[:last_nonwavenum_idx] else c
-            )
-            for df in masked_trainingDataframeList
-        ),
-        ignore_index=True
-    )
-    masked_trainingDataframeList = None # Clear memory
-
-    interpRawTrainingDataframe = pd.DataFrame()
-    interpDataFramelist=[]
-
-    # Interpolate the spectra to increase the accuracy of the model
-    for index, row in rawTrainingDataframe.iterrows():
-
-        row = row[last_nonwavenum_idx:]
-
-        frequencies = row.index.to_numpy(dtype=float)
-        frequencies = frequencies[::-1]  # Reverse the order for interpolation
-        spectrum = row.to_numpy(dtype=float)
-        spectrum = spectrum[::-1]  # Reverse the order for interpolation
-
-        frequencies, spectrum = pipeline(frequencies, spectrum)
-
-        interpDataFramelist.append(pd.DataFrame(data=[spectrum], columns=frequencies))
-
-    interpRawTrainingDataframe = pd.concat(interpDataFramelist, ignore_index=True)
-    interpDataFramelist = None # Clear memory
-    interpRawTrainingDataframe.to_csv("interpolated_training_data.csv", index=False)
-    frequencies = interpRawTrainingDataframe.columns.astype(float)
-
-    print("Data preprocessing and interpolation complete.")
-
-else:
-    interpRawTrainingDataframe = pd.read_csv("interpolated_training_data.csv", low_memory=False)
-    frequencies = interpRawTrainingDataframe.columns.astype(float)
 
 """
 Prepare the training and validation data
 
 """
+training_df = pd.read_csv("interpolated_training_data.csv", low_memory=False)
+validation_df = pd.read_csv("interpolated_validation_data.csv", low_memory=False)
 
-frequencies = interpRawTrainingDataframe.columns.astype(float)
-wavenumbers = interpRawTrainingDataframe.columns
+frequencies = training_df.columns.astype(float)
+wavenumbers = training_df.columns.astype(str)
 
-betaVAE_trainingData = interpRawTrainingDataframe[wavenumbers]
+betaVAE_trainingData = training_df[wavenumbers]
 betaVAE_validationData = validation_df[wavenumbers]
 
 trainingArray = np.asarray(betaVAE_trainingData.values, dtype=np.float32)
@@ -295,7 +171,7 @@ X_train, X_val = train_test_split(trainingArray, train_size=0.9, test_size=0.1, 
 
 print(X_train.shape, X_val.shape)
 
-interpRawTrainingDataframe = None # Clear memory
+training_df = None # Clear memory
 validation_df = None # Clear memory
 betaVAE_trainingData = None # Clear memory
 betaVAE_validationData = None # Clear memory
@@ -307,10 +183,9 @@ Define the model parameters
 input_dim = len(wavenumbers)
 output_dim = input_dim
 
-batch = 128
+batch = 32
 
-hidden_dim1 = 512
-hidden_dim2 = 256
+hidden_dims = [512,256]
 
 latent_dim = 16
 
@@ -322,29 +197,30 @@ epochs = 200
 Build the Encoder
 
 """
-input = keras.Input(shape=input_dim, name='spectra_input')
-#x = layers.GaussianNoise(0.05)(input)
-x = layers.Dense(hidden_dim1, activation='gelu')(input)
-x = layers.Dense(hidden_dim2, activation='gelu')(x)
-x = layers.Dense(128, activation='gelu')(x)
-z_mean = layers.Dense(latent_dim, name='z_mean')(x)
-z_logvar = layers.Dense(latent_dim, name='z_logvar')(x) 
-z_logvar = tf.clip_by_value(z_logvar, -10, 10)
-z = Sampling()([z_mean, z_logvar])
-encoder = keras.Model(inputs=input, outputs=[z_mean, z_logvar, z], name='encoder')
-encoder.summary()
+def make_encoder(input_dim, latent_dim, hidden):
+    x_in = keras.Input(shape=(input_dim,), name="x")
+    x = x_in
+    for i, h in enumerate(hidden):
+        x = layers.Dense(h, activation="gelu", name=f"enc_dense_{i}")(x)
+    z_mean   = layers.Dense(latent_dim, name="z_mean")(x)
+    z_logvar = layers.Dense(latent_dim, name="z_logvar")(x)
+    z = Sampling()([z_mean, z_logvar])
+    return keras.Model(x_in, [z_mean, z_logvar, z], name="encoder")
 
 """
 Build the Decoder 
 
 """
-latent_inputs = keras.Input(shape=(latent_dim,), name='latent_variables')
-x = layers.Dense(128, activation='gelu')(latent_inputs)
-x = layers.Dense(hidden_dim2, activation='gelu')(x)
-x = layers.Dense(hidden_dim1, activation='gelu')(x)
-outputs = layers.Dense(output_dim, activation='linear')(latent_inputs)
-decoder = keras.Model([latent_inputs], outputs, name='decoder')
-decoder.summary()
+def make_decoder(output_dim, latent_dim, hidden):
+    z_in = keras.Input(shape=(latent_dim,), name="z")
+    x = z_in
+    for i, h in enumerate(hidden[::-1]):
+        x = layers.Dense(h, activation="gelu", name=f"dec_dense_{i}")(x)
+    x_out = layers.Dense(output_dim, activation="linear", name="x_recon")(x)
+    return keras.Model(z_in, x_out, name="decoder")
+
+encoder = make_encoder(input_dim, latent_dim, hidden_dims)
+decoder = make_decoder(input_dim, latent_dim, hidden_dims)
 
 """
 Build the VAE Model and Train
@@ -365,7 +241,7 @@ NaNTerminate = keras.callbacks.TerminateOnNaN()
 reduceLearningRate = keras.callbacks.ReduceLROnPlateau(monitor="val_total_loss", factor=0.5, patience=10, min_lr=1e-5)
 
 callbacks = [
-    keras.callbacks.EarlyStopping(monitor='val_total_loss', patience=20, restore_best_weights=True),
+    keras.callbacks.EarlyStopping(monitor='val_total_loss', patience=12, restore_best_weights=True),
     keras.callbacks.ReduceLROnPlateau(monitor="val_total_loss", factor=0.5, patience=10, min_lr=1e-5),
     keras.callbacks.TerminateOnNaN(),
     ]
@@ -384,7 +260,7 @@ print("Z Log Var shape:", z_logvar.shape)
 Save the model and reload to test that it saved correctly
 
 """
-#tf.saved_model.save(vae, "./new_vae/")
+
 tf.saved_model.save(encoder, './new_encoder/')
 tf.saved_model.save(decoder, './new_decoder/')
 tf.saved_model.save(vae, './new_vae/')
@@ -398,20 +274,6 @@ saved_vae = tf.saved_model.load("./new_vae/")
 
 if saved_encoder is not None and saved_decoder is not None and saved_vae is not None:
     print("All models loaded successfully!")
-
-    X = trainingArray
-    # --- Encode all data deterministically ---
-    Z = encoder(X, training=False)  # shape (n_samples, LATENT_DIM)
-
-    # --- Rank dimensions by variance ---
-    variances = np.var(Z, axis=0)
-    ranked_dims = np.argsort(variances)[::-1]
-    print("Latent dimensions ranked by variance (most informative first):")
-    for i, dim in enumerate(ranked_dims):
-        print(f"  Dim {dim}  Var={variances[dim]:.4f}")
-
-    saved_encoder = None
-    saved_decoder = None
 
 else:
     print("Failed to load the model.")
