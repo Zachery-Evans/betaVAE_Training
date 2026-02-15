@@ -384,7 +384,8 @@ def distribution_Selection(df, distributionIdx, numberOfSigmas):
     upperDistributionBound = modePosition + numberOfSigmas * sigma
 
     # Select the range of PE normalization integral to be accepted by the mask
-    mask_selected = (area >= lowerDistributionBound) & (area <= upperDistributionBound)
+    mask_selected = (~np.isnan(area) & (area >= lowerDistributionBound) & (area <= upperDistributionBound))
+    
     selected_indexes = df.index[mask_selected]
     discarded_indexes = df.index[~mask_selected]
 
@@ -410,6 +411,8 @@ def thickness_normalizer(spectrum_array, IntStd):
 def pipeline(expt_wavenumber, expt_absorbance):
     f = expt_wavenumber
     a = expt_absorbance
+    # Smooth the spectra so beta VAE has a better shot at determining variances
+    a = savgol_filter(a, 13, 1)
 
     internal_std_int = calculate_peak_intensity(f, a, (1990,2090))[1]
     a = a / internal_std_int
@@ -417,7 +420,7 @@ def pipeline(expt_wavenumber, expt_absorbance):
     normalized_absorbance = thickness_normalizer(a, Std)
 
     #apply the interpolation to the spectral window
-    interpolated_wavenumber, interpolated_absorbance = cut_keep(f, normalized_absorbance, 898, 1400)
+    interpolated_wavenumber, interpolated_absorbance = cut_keep(f, normalized_absorbance, 895, 1200)
 
     #calculate the baseline
     baseline1 = airpls(interpolated_absorbance)
@@ -428,7 +431,7 @@ def pipeline(expt_wavenumber, expt_absorbance):
     corrected2 = corrected1 - baseline2
 
     baseline3 = rubberband_baseline(interpolated_wavenumber, corrected2)
-    corrected3 = corrected2 - baseline3
+    corrected3 = corrected1 - baseline3
 
     fingerprint_cm = interpolated_wavenumber
     fingerprint_abs = corrected3
@@ -439,7 +442,7 @@ def pipeline(expt_wavenumber, expt_absorbance):
     baseline1 = airpls(interpolated_absorbance)
 
     #baseline correct the spectrum
-    corrected1 = interpolated_absorbance - baseline1
+    corrected1 = interpolated_absorbance #- baseline1
 
     baseline2 = rubberband_baseline(interpolated_wavenumber, corrected1)
     corrected2 = corrected1 - baseline2
