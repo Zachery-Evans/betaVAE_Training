@@ -6,6 +6,8 @@ Date Created: 2023-04-01
 
 """
 #imports
+import os 
+import re
 import pandas as pd 
 import numpy as np 
 import numpy.matlib 
@@ -411,65 +413,61 @@ def thickness_normalizer(spectrum_array, IntStd):
 def pipeline(expt_wavenumber, expt_absorbance):
     f = expt_wavenumber
     a = expt_absorbance
-    # Smooth the spectra so beta VAE has a better shot at determining variances
-    a = savgol_filter(a, 13, 1)
-
-    internal_std_int = calculate_peak_intensity(f, a, (1990,2090))[1]
-    a = a / internal_std_int
-    Std = integrate_peak(f, a, low=2000, high=2050)
-    normalized_absorbance = thickness_normalizer(a, Std)
-
     #apply the interpolation to the spectral window
-    interpolated_wavenumber, interpolated_absorbance = cut_keep(f, normalized_absorbance, 895, 1200)
+    interpolated_wavenumber, interpolated_absorbance = interpolate_spectrum(f, a, 898, 1400)
 
     #calculate the baseline
     baseline1 = airpls(interpolated_absorbance)
     #baseline correct the spectrum
     corrected1 = interpolated_absorbance - baseline1
 
-    baseline2 = polynomial_background(interpolated_wavenumber, corrected1, odr=2, s=0.006, fct='atq')[0]
+    baseline2 = polynomial_background(interpolated_wavenumber, corrected1,odr=2, s=0.006, fct='atq')[0]
     corrected2 = corrected1 - baseline2
 
     baseline3 = rubberband_baseline(interpolated_wavenumber, corrected2)
-    corrected3 = corrected1 - baseline3
+    corrected3 = corrected2 - baseline3
 
     fingerprint_cm = interpolated_wavenumber
     fingerprint_abs = corrected3
     
     #apply the interpolation to the spectral window
-    interpolated_wavenumber, interpolated_absorbance = cut_keep(f, normalized_absorbance, 1520, 1800)
+    interpolated_wavenumber, interpolated_absorbance = interpolate_spectrum(f, a, 1520, 1800)
     #calculate the baseline
     baseline1 = airpls(interpolated_absorbance)
 
     #baseline correct the spectrum
-    corrected1 = interpolated_absorbance #- baseline1
+    corrected1 = interpolated_absorbance - baseline1
 
     baseline2 = rubberband_baseline(interpolated_wavenumber, corrected1)
     corrected2 = corrected1 - baseline2
 
     carbonyl_cm = interpolated_wavenumber
     carbonyl_abs = corrected2
-
-    """  Uninformative region containing unchanging PE bands
+    
     #apply the interpolation to the spectral window
-    interpolated_wavenumber, interpolated_absorbance = sp.interpolate_spectrum(f, normalized_absorbance, 1850, 2110)
+    interpolated_wavenumber, interpolated_absorbance = interpolate_spectrum(f, a, 1850, 2110)
     #calculate the baseline
-    baseline1 = sp.airpls(interpolated_absorbance)
+    baseline1 = airpls(interpolated_absorbance)
     #baseline correct the spectrum
     corrected1 = interpolated_absorbance - baseline1
 
-    baseline2 = sp.rubberband_baseline(interpolated_wavenumber, corrected1)
+    baseline2 = rubberband_baseline(interpolated_wavenumber, corrected1)
     corrected2 = corrected1 - baseline2
 
     polyethylene_cm = interpolated_wavenumber
     polyethylene_abs = corrected2
-    """
     
-    def merge_arrays(arr1, arr2):
-        merged_array = np.concatenate((arr1, arr2))
+    def merge_arrays(arr1, arr2, arr3):
+        merged_array = np.concatenate((arr1, arr2, arr3))
         return merged_array
     
-    wavenumber = merge_arrays(fingerprint_cm, carbonyl_cm)
-    absorbance = merge_arrays(fingerprint_abs, carbonyl_abs)
+    wavenumber = merge_arrays(fingerprint_cm, carbonyl_cm, polyethylene_cm)
+    absorbance = merge_arrays(fingerprint_abs, carbonyl_abs, polyethylene_abs)
+    
+    internal_std_int = calculate_peak_intensity(wavenumber, absorbance, (1990,2090))[1]
+    absorbance = absorbance/internal_std_int
+
+    wavenumber, absorbance = cut_keep(wavenumber, absorbance, 898, 1800)
+    #normalized = thickness_normalizer(Abs,Std)
     
     return wavenumber, absorbance
