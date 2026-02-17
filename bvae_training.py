@@ -78,7 +78,7 @@ class BetaVAE(keras.Model):
         super().__init__(**kwargs)
         self.encoder = encoder
         self.decoder = decoder
-        self.beta = beta
+        self.beta = tf.Variable(beta, trainable=False, dtype=tf.float32)
         # Trackers for clean progress bars
         self.total_loss_tracker = keras.metrics.Mean(name="total_loss")
         self.recon_loss_tracker = keras.metrics.Mean(name="recon_loss")
@@ -156,21 +156,22 @@ Prepare the training and validation data
 
 """
 training_df = pd.read_csv("interpolated_training_data.csv", low_memory=False)
-validation_df = pd.read_csv("interpolated_validation_data.csv", low_memory=False)
+validation_df = pd.read_csv("interpolated_testing_data.csv", low_memory=False)
 
 frequencies = training_df.columns.astype(float)
 wavenumbers = training_df.columns.astype(str)
 
 betaVAE_trainingData = training_df[wavenumbers]
-betaVAE_validationData = validation_df[wavenumbers]
+#betaVAE_validationData = validation_df[wavenumbers]
 
 trainingArray = np.asarray(betaVAE_trainingData.values, dtype=np.float32)
-validationArray = np.asarray(betaVAE_validationData.values, dtype=np.float32)
+#validationArray = np.asarray(betaVAE_validationData.values, dtype=np.float32)
 
 X_train, X_val = train_test_split(trainingArray, train_size=0.9, test_size=0.1, shuffle=True)
 
 print(X_train.shape, X_val.shape)
-
+training_df = pd.DataFrame(data=X_train, columns=wavenumbers)
+training_df.to_csv("training_data.csv", index=False)
 training_df = None # Clear memory
 validation_df = None # Clear memory
 betaVAE_trainingData = None # Clear memory
@@ -185,11 +186,11 @@ output_dim = input_dim
 
 batch = 32
 
-hidden_dims = [512,256]
+hidden_dims = [512, 256, 128]
 
 latent_dim = 16
 
-beta = 1
+beta = 20
 
 epochs = 200
 
@@ -199,7 +200,8 @@ Build the Encoder
 """
 def make_encoder(input_dim, latent_dim, hidden):
     x_in = keras.Input(shape=(input_dim,), name="x")
-    x = x_in
+    x=x_in
+    #x = layers.GaussianNoise(0.05)(x)
     for i, h in enumerate(hidden):
         x = layers.Dense(h, activation="gelu", name=f"enc_dense_{i}")(x)
     z_mean   = layers.Dense(latent_dim, name="z_mean")(x)
@@ -233,17 +235,11 @@ vae.compile(
     optimizer=keras.optimizers.Adam(learning_rate=1e-3)
 )
 
-#vae.fit(trainingArray, trainingArray, epochs=epochs, batch_size=batch, callbacks=[LinearBetaAnneal(vae, warmup_epochs=30, beta_max=beta)])
-
-earlyStopping = keras.callbacks.EarlyStopping(monitor='val_total_loss', patience=12, restore_best_weights=True)
-betaAnnealing = CyclicalBetaAnneal(vae, cycle_length=10, warmup_ratio=0.5, beta_max=beta)
-NaNTerminate = keras.callbacks.TerminateOnNaN()
-reduceLearningRate = keras.callbacks.ReduceLROnPlateau(monitor="val_total_loss", factor=0.5, patience=10, min_lr=1e-5)
-
 callbacks = [
-    keras.callbacks.EarlyStopping(monitor='val_total_loss', patience=12, restore_best_weights=True),
-    keras.callbacks.ReduceLROnPlateau(monitor="val_total_loss", factor=0.5, patience=10, min_lr=1e-5),
+    keras.callbacks.EarlyStopping(monitor='val_total_loss', patience=30, restore_best_weights=True),
+    keras.callbacks.ReduceLROnPlateau(monitor="val_total_loss", factor=0.1, patience=10, min_lr=1e-5),
     keras.callbacks.TerminateOnNaN(),
+    LinearBetaAnneal(vae, warmup_epochs=10, beta_max=beta)
     ]
 
 history = vae.fit(X_train, validation_data=(X_val,), epochs=epochs, batch_size=batch, callbacks=callbacks, verbose=1)
@@ -277,3 +273,5 @@ if saved_encoder is not None and saved_decoder is not None and saved_vae is not 
 
 else:
     print("Failed to load the model.")
+
+
