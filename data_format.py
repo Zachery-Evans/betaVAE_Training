@@ -7,7 +7,7 @@ from spectrum_preprocessing import roundWavenumbers, distribution_Selection, pip
 Load and Format the TESTING data 
 
 """
-stdDevs = 3
+stdDevs = 2
 print("Loading and preprocessing testing data...")
 if not os.path.exists('./interpolated_testing_data.csv'):
     testing_df = pd.read_csv('./spectral_data/SMP65#013 35d 920um.csv', low_memory=False, skiprows=[1,2])
@@ -116,4 +116,3 @@ else:
     print("CSV File already exists.")
     training_df = pd.read_csv("interpolated_training_data.csv", low_memory=False)
     frequencies = training_df.columns.astype(float)
-
