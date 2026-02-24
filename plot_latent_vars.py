@@ -78,7 +78,7 @@ for i, dim in enumerate(ranked_dims):
 # --- Parameters for traversal ---
 N_STEPS = 7                # how many points to sample per dim
 SIGMA_SCALE = 3.0          # ± range to explore
-TOP_N = 5 # how many top dims to visualize
+TOP_N = 8 # how many top dims to visualize
 wn = np.array(kept_wn)
 
 # --- Compute the latent mean for reference ---
@@ -111,7 +111,7 @@ for d in ranked_dims[:TOP_N]:
     for i, (spec, val) in enumerate(zip(traversed_spectra, traversal_values)):
         # map i -> [0,1] for colormap
         if N_STEPS > 1:
-            t = i / (N_STEPS - 1)
+            t = 0.8*(i / (N_STEPS - 1))
         else:
             t = 0.5
         color = cmap(t)
