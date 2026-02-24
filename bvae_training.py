@@ -172,6 +172,9 @@ X_train, X_val = train_test_split(trainingArray, train_size=0.9, test_size=0.1, 
 print(X_train.shape, X_val.shape)
 training_df = pd.DataFrame(data=X_train, columns=wavenumbers)
 training_df.to_csv("training_data.csv", index=False)
+validation_df = pd.DataFrame(data=X_val, columns=wavenumbers)
+validation_df.to_csv("validation_data.csv", index=False)
+
 training_df = None # Clear memory
 validation_df = None # Clear memory
 betaVAE_trainingData = None # Clear memory
@@ -190,7 +193,7 @@ hidden_dims = [512, 256, 128]
 
 latent_dim = 16
 
-beta = 20
+beta = 2
 
 epochs = 200
 
@@ -201,7 +204,7 @@ Build the Encoder
 def make_encoder(input_dim, latent_dim, hidden):
     x_in = keras.Input(shape=(input_dim,), name="x")
     x=x_in
-    #x = layers.GaussianNoise(0.05)(x)
+    x = layers.GaussianNoise(0.05)(x)
     for i, h in enumerate(hidden):
         x = layers.Dense(h, activation="gelu", name=f"enc_dense_{i}")(x)
     z_mean   = layers.Dense(latent_dim, name="z_mean")(x)
@@ -232,14 +235,14 @@ Build the VAE Model and Train
 vae = BetaVAE(encoder, decoder, beta)
 
 vae.compile(
-    optimizer=keras.optimizers.Adam(learning_rate=1e-3)
+    optimizer=keras.optimizers.Adam(learning_rate=1e-4)
 )
 
 callbacks = [
-    keras.callbacks.EarlyStopping(monitor='val_total_loss', patience=30, restore_best_weights=True),
-    keras.callbacks.ReduceLROnPlateau(monitor="val_total_loss", factor=0.1, patience=10, min_lr=1e-5),
+    keras.callbacks.EarlyStopping(monitor='val_total_loss', patience=12, restore_best_weights=True),
+    #keras.callbacks.ReduceLROnPlateau(monitor="val_total_loss", factor=0.1, patience=10, min_lr=1e-5),
     keras.callbacks.TerminateOnNaN(),
-    LinearBetaAnneal(vae, warmup_epochs=10, beta_max=beta)
+    #LinearBetaAnneal(vae, warmup_epochs=10, beta_max=beta)
     ]
 
 history = vae.fit(X_train, validation_data=(X_val,), epochs=epochs, batch_size=batch, callbacks=callbacks, verbose=1)
