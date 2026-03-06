@@ -193,7 +193,7 @@ hidden_dims = [512, 256, 128]
 
 latent_dim = 16
 
-beta = 2
+beta = 3
 
 epochs = 200
 

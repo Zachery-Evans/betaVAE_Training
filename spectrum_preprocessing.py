@@ -413,6 +413,7 @@ def thickness_normalizer(spectrum_array, IntStd):
 def pipeline(expt_wavenumber, expt_absorbance):
     f = expt_wavenumber
     a = expt_absorbance
+
     #apply the interpolation to the spectral window
     interpolated_wavenumber, interpolated_absorbance = interpolate_spectrum(f, a, 898, 1400)
 
@@ -463,11 +464,11 @@ def pipeline(expt_wavenumber, expt_absorbance):
     
     wavenumber = merge_arrays(fingerprint_cm, carbonyl_cm, polyethylene_cm)
     absorbance = merge_arrays(fingerprint_abs, carbonyl_abs, polyethylene_abs)
-    
+
     internal_std_int = calculate_peak_intensity(wavenumber, absorbance, (1990,2090))[1]
     absorbance = absorbance/internal_std_int
-
-    wavenumber, absorbance = cut_keep(wavenumber, absorbance, 898, 1800)
-    #normalized = thickness_normalizer(Abs,Std)
+    Std = integrate_peak(wavenumber, absorbance, low=2000, high=2050)
+    Abs = absorbance[0:len(wavenumber)]
+    absorbance = thickness_normalizer(Abs, Std)
     
     return wavenumber, absorbance
