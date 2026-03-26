@@ -125,10 +125,12 @@ for d in ranked_dims[:TOP_N]:
         )
 
     plt.gca().invert_xaxis()
-    plt.xlabel("Wavenumber (cm$^{-1}$)")
-    plt.ylabel("Intensity (a.u.)")
-    plt.title(f"Latent dim {d} traversal (σ={std_d:.3f})")
-    plt.legend(title="z value", fontsize=8)
+    plt.xticks(fontsize=16)
+    plt.yticks(fontsize=16)
+    plt.xlabel("Wavenumber (cm$^{-1}$)", fontsize=16)
+    plt.ylabel("Intensity (a.u.)", fontsize=16)
+    plt.title(f"Latent dim {d} traversal (σ={std_d:.3f})", fontsize=16)
+    plt.legend(title="z value", fontsize=16)
     plt.tight_layout()
     #plt.savefig(f"Zero_offset_Latent_dim_{d}_traversal_sigma_{std_d:.3f}.jpeg",
     #            dpi=300)
