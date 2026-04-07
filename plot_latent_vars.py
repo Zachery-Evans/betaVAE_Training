@@ -78,7 +78,7 @@ for i, dim in enumerate(ranked_dims):
 # --- Parameters for traversal ---
 N_STEPS = 7                # how many points to sample per dim
 SIGMA_SCALE = 3.0          # ± range to explore
-TOP_N = 8 # how many top dims to visualize
+TOP_N = 4 # how many top dims to visualize
 wn = np.array(kept_wn)
 
 # --- Compute the latent mean for reference ---

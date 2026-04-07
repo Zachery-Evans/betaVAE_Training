@@ -191,7 +191,7 @@ batch = 32
 
 hidden_dims = [512, 256, 128]
 
-latent_dim = 16
+latent_dim = 8
 
 beta = 3
 
@@ -206,7 +206,7 @@ def make_encoder(input_dim, latent_dim, hidden):
     x=x_in
     x = layers.GaussianNoise(0.05)(x)
     for i, h in enumerate(hidden):
-        x = layers.Dense(h, activation="gelu", name=f"enc_dense_{i}")(x)
+        x = layers.Dense(h, activation="relu", name=f"enc_dense_{i}")(x)
     z_mean   = layers.Dense(latent_dim, name="z_mean")(x)
     z_logvar = layers.Dense(latent_dim, name="z_logvar")(x)
     z = Sampling()([z_mean, z_logvar])
@@ -220,7 +220,7 @@ def make_decoder(output_dim, latent_dim, hidden):
     z_in = keras.Input(shape=(latent_dim,), name="z")
     x = z_in
     for i, h in enumerate(hidden[::-1]):
-        x = layers.Dense(h, activation="gelu", name=f"dec_dense_{i}")(x)
+        x = layers.Dense(h, activation="relu", name=f"dec_dense_{i}")(x)
     x_out = layers.Dense(output_dim, activation="linear", name="x_recon")(x)
     return keras.Model(z_in, x_out, name="decoder")
 
