@@ -54,7 +54,7 @@ if not os.path.exists('./interpolated_training_data.csv'):
     #List all of the files in the data directory.
     allFiles = os.listdir(path)
     # Take only the files that contain data pertaining to SMP65#010 
-    trainingFiles = [file for file in allFiles if file.endswith('.csv') and 'SMP65#010' in file and 'full width' not in file]
+    trainingFiles = [file for file in allFiles if file.endswith('.csv') and 'SMP65#01' in file and 'full width' not in file]
 
     trainingFiles = sorted(trainingFiles, key=lambda x: int(re.search(r'(?<= )(.+?)(?=d)', x).group()))
 

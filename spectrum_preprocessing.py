@@ -434,7 +434,7 @@ def pipeline(expt_wavenumber, expt_absorbance):
     f = expt_wavenumber
     a = expt_absorbance
 
-    fingerprint_cm, fingerprint_abs =  process_region(f, a, 898, 1195, use_poly = True)
+    fingerprint_cm, fingerprint_abs =  process_region(f, a, 898, 1200, use_poly = True)
     
     carbonyl_cm, carbonyl_abs = process_region(f, a, 1520, 1800, use_poly = True)
 

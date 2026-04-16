@@ -191,7 +191,7 @@ batch = 32
 
 hidden_dims = [512, 256, 128]
 
-latent_dim = 8
+latent_dim = 16
 
 beta = 3
 
@@ -235,12 +235,12 @@ Build the VAE Model and Train
 vae = BetaVAE(encoder, decoder, beta)
 
 vae.compile(
-    optimizer=keras.optimizers.Adam(learning_rate=1e-4)
+    optimizer=keras.optimizers.Adam(learning_rate=1e-5)
 )
 
 callbacks = [
-    keras.callbacks.EarlyStopping(monitor='val_total_loss', patience=12, restore_best_weights=True),
-    #keras.callbacks.ReduceLROnPlateau(monitor="val_total_loss", factor=0.1, patience=10, min_lr=1e-5),
+    keras.callbacks.EarlyStopping(monitor='val_total_loss', patience=12, restore_best_weights=False),
+    #keras.callbacks.ReduceLROnPlateau(monitor="val_total_loss", factor=0.5, patience=10, min_lr=1e-5),
     keras.callbacks.TerminateOnNaN(),
     #LinearBetaAnneal(vae, warmup_epochs=10, beta_max=beta)
     ]
