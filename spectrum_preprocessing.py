@@ -351,9 +351,10 @@ def roundWavenumbers(dataframe):
     Function for rounding the wavenumbers so that there is no mismatch between the machine 
     precision of saving the files in Quasar and the wavenumbers output by the FTIR microscope
     """
-    last_nonwavenum_idx = dataframe.columns.get_loc('1981.7 - 2095.8') + 1
+    numlike = compile(r"^-?\d+(\.\d+)?$")
+    numeric_idxs = np.array([c for c in dataframe.columns if numlike.match(str(c).strip())])
 
-    dataframe = dataframe.rename(columns=lambda c: round(float(c), 1) if c not in dataframe.columns[:last_nonwavenum_idx] else c)
+    dataframe = dataframe.rename(columns=lambda c: round(float(c), 1) if c in numeric_idxs else c)
     return dataframe
 
 def distribution_Selection(df, distributionIdx, numberOfSigmas):
