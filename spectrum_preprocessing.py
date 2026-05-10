@@ -128,10 +128,26 @@ def interpolate_spectrum(input_wavenumber, input_absorbance, low=898, high=3800)
         
     '''
 
-    tck = interpolate.make_splrep(input_wavenumber, input_absorbance, s=0)
-    window = high - low + 1
-    interpolated_wavenumber = np.linspace(low, high, window)
-    interpolated_absorbance = interpolate.splev(interpolated_wavenumber, tck, der=0)
+    try:
+        tck = interpolate.make_splrep(input_wavenumber, input_absorbance, s=0)
+        window = high - low + 1
+        interpolated_wavenumber = np.linspace(low, high, window)
+        interpolated_absorbance = interpolate.splev(interpolated_wavenumber, tck, der=0)
+    #Value error in case there are infs or nans in the dataset
+    except ValueError:
+        invalid = ~np.isfinite(input_absorbance)
+        valid = ~invalid
+        
+        # Indices of all elements
+        indices = np.arange(len(input_absorbance))
+        
+        # Fill invalid spots with interpolated values
+        input_absorbance[invalid] = np.interp(indices[invalid], indices[valid], input_absorbance[valid])
+
+        tck = interpolate.make_splrep(input_wavenumber, input_absorbance, s=0)
+        window = high - low + 1
+        interpolated_wavenumber = np.linspace(low, high, window)
+        interpolated_absorbance = interpolate.splev(interpolated_wavenumber, tck, der=0)
     
     return (interpolated_wavenumber, interpolated_absorbance)
 
@@ -351,7 +367,7 @@ def roundWavenumbers(dataframe):
     Function for rounding the wavenumbers so that there is no mismatch between the machine 
     precision of saving the files in Quasar and the wavenumbers output by the FTIR microscope
     """
-    numlike = compile(r"^-?\d+(\.\d+)?$")
+    numlike = re.compile(r"^-?\d+(\.\d+)?$")
     numeric_idxs = np.array([c for c in dataframe.columns if numlike.match(str(c).strip())])
 
     dataframe = dataframe.rename(columns=lambda c: round(float(c), 1) if c in numeric_idxs else c)
