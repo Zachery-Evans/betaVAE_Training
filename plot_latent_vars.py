@@ -91,7 +91,7 @@ for i, dim in enumerate(ranked_dims):
 
 # --- Parameters for traversal ---
 N_STEPS = 7                # how many points to sample per dim
-SIGMA_SCALE = 4.0          # ± range to explore
+SIGMA_SCALE = 6.0          # ± range to explore
 TOP_N = 4 # how many top dims to visualize
 wn = np.array(kept_wn)
 
@@ -106,8 +106,8 @@ for d in ranked_dims[:TOP_N]:
     z_ref = np.copy(z_mean_global)
     std_d = np.std(Z[:, d])
     traversal_values = np.linspace(
-        z_ref[d] - SIGMA_SCALE * std_d,
-        z_ref[d] + SIGMA_SCALE * std_d,
+        -3,
+        3,
         N_STEPS
     )
 
