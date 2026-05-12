@@ -7,7 +7,7 @@ from spectrum_preprocessing import roundWavenumbers, distribution_Selection, pip
 Load and Format the TESTING data 
 
 """
-stdDevs = 5
+stdDevs = 3
 print("Loading and preprocessing testing data...")
 if not os.path.exists('./interpolated_testing_data.csv'):
     testing_df = pd.read_csv('./spectral_data/SMP65#013 35d 920um.csv', low_memory=True, skiprows=[1,2])
