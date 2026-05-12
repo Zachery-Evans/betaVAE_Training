@@ -1,6 +1,7 @@
 import os
 os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 os.environ["KERAS BACKEND"] = "tensorflow"
+from sklearn.metrics import pairwise_distances
 import matplotlib.pyplot as plt
 from matplotlib import cm
 import pandas as pd
@@ -40,8 +41,21 @@ kept_wn = df.columns.values.astype('float')
 
 # pick random examples to visualize
 N_SHOW = 5
+
+N = min(N_SHOW, len(X))
 rng = np.random.default_rng(42)
-idxs = rng.choice(len(X), size=min(N_SHOW, len(X)), replace=False)
+
+selected = [rng.integers(len(X))]
+min_dist = pairwise_distances(X, X[selected]).flatten()
+
+for _ in range(N - 1):
+    next_idx = np.argmax(min_dist)
+    selected.append(next_idx)
+
+    new_dist = pairwise_distances(X, X[[next_idx]]).flatten()
+    min_dist = np.minimum(min_dist, new_dist)
+
+idxs = np.array(selected)
 
 X_subset = X[idxs]
 X_recon = reconstruct(X_subset)
@@ -77,7 +91,7 @@ for i, dim in enumerate(ranked_dims):
 
 # --- Parameters for traversal ---
 N_STEPS = 7                # how many points to sample per dim
-SIGMA_SCALE = 3.0          # ± range to explore
+SIGMA_SCALE = 4.0          # ± range to explore
 TOP_N = 4 # how many top dims to visualize
 wn = np.array(kept_wn)
 
