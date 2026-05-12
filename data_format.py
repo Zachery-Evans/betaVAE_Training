@@ -7,10 +7,10 @@ from spectrum_preprocessing import roundWavenumbers, distribution_Selection, pip
 Load and Format the TESTING data 
 
 """
-stdDevs = 2
+stdDevs = 5
 print("Loading and preprocessing testing data...")
 if not os.path.exists('./interpolated_testing_data.csv'):
-    testing_df = pd.read_csv('./spectral_data/SMP65#013 35d 920um.csv', low_memory=False, skiprows=[1,2])
+    testing_df = pd.read_csv('./spectral_data/SMP65#013 35d 920um.csv', low_memory=True, skiprows=[1,2])
     testing_df = roundWavenumbers(testing_df)
 
     last_nonwavenum_idx = testing_df.columns.get_loc('1981.7 - 2095.8') + 1
@@ -41,7 +41,7 @@ if not os.path.exists('./interpolated_testing_data.csv'):
     print("Testing data preprocessing and interpolation complete, CSV file created.")
 else:
     print("CSV File already exists.")
-    testing_df = pd.read_csv("interpolated_testing_data.csv", low_memory=False)
+    testing_df = pd.read_csv("interpolated_testing_data.csv", low_memory=True)
 
 
 """
@@ -54,12 +54,12 @@ if not os.path.exists('./interpolated_training_data.csv'):
     #List all of the files in the data directory.
     allFiles = os.listdir(path)
     # Take only the files that contain data pertaining to SMP65#010 
-    trainingFiles = [file for file in allFiles if file.endswith('.csv') and 'SMP65#01' in file and 'full width' not in file]
+    trainingFiles = [file for file in allFiles if file.endswith('.csv') and 'SMP65#010' in file and 'full width' not in file and 'hotspot' not in file]
 
     trainingFiles = sorted(trainingFiles, key=lambda x: int(re.search(r'(?<= )(.+?)(?=d)', x).group()))
 
     # Read all of the data and place the dataframes into a list
-    trainingDataframeList = [pd.read_csv(path+file, low_memory=False, skiprows=[1,2]) for file in trainingFiles]
+    trainingDataframeList = [pd.read_csv(path+file, low_memory=True, skiprows=[1,2]) for file in trainingFiles]
 
     print(trainingFiles)
 
@@ -114,5 +114,5 @@ if not os.path.exists('./interpolated_training_data.csv'):
 
 else:
     print("CSV File already exists.")
-    training_df = pd.read_csv("interpolated_training_data.csv", low_memory=False)
+    training_df = pd.read_csv("interpolated_training_data.csv", low_memory=True)
     frequencies = training_df.columns.astype(float)
