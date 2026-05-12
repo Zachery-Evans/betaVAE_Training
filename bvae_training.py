@@ -167,7 +167,7 @@ betaVAE_trainingData = training_df[wavenumbers]
 trainingArray = np.asarray(betaVAE_trainingData.values, dtype=np.float32)
 #validationArray = np.asarray(betaVAE_validationData.values, dtype=np.float32)
 
-X_train, X_val = train_test_split(trainingArray, train_size=0.9, test_size=0.1, shuffle=True)
+X_train, X_val = train_test_split(trainingArray, train_size=0.8, test_size=0.2, shuffle=True)
 
 print(X_train.shape, X_val.shape)
 training_df = pd.DataFrame(data=X_train, columns=wavenumbers)
@@ -191,11 +191,11 @@ batch = 32
 
 hidden_dims = [512, 256, 128]
 
-latent_dim = 16
+latent_dim = 8
 
 beta = 3
 
-epochs = 200
+epochs = 15
 
 """
 Build the Encoder
@@ -219,7 +219,7 @@ Build the Decoder
 def make_decoder(output_dim, latent_dim, hidden):
     z_in = keras.Input(shape=(latent_dim,), name="z")
     x = z_in
-    for i, h in enumerate(hidden[::-1]):
+    for i, h in enumerate(hidden[2::-1]):
         x = layers.Dense(h, activation="relu", name=f"dec_dense_{i}")(x)
     x_out = layers.Dense(output_dim, activation="linear", name="x_recon")(x)
     return keras.Model(z_in, x_out, name="decoder")
@@ -235,14 +235,15 @@ Build the VAE Model and Train
 vae = BetaVAE(encoder, decoder, beta)
 
 vae.compile(
-    optimizer=keras.optimizers.Adam(learning_rate=1e-5)
+    optimizer=keras.optimizers.Adam(learning_rate=5e-4)
 )
 
 callbacks = [
-    keras.callbacks.EarlyStopping(monitor='val_total_loss', patience=12, restore_best_weights=False),
-    #keras.callbacks.ReduceLROnPlateau(monitor="val_total_loss", factor=0.5, patience=10, min_lr=1e-5),
+    #keras.callbacks.EarlyStopping(monitor='val_total_loss', patience=10, restore_best_weights=False),
+    #keras.callbacks.ReduceLROnPlateau(monitor="val_total_loss", factor=0.2, patience=5, min_lr=1e-5),
     keras.callbacks.TerminateOnNaN(),
-    #LinearBetaAnneal(vae, warmup_epochs=10, beta_max=beta)
+    LinearBetaAnneal(vae, warmup_epochs=10, beta_max=beta)
+    #CyclicalBetaAnneal(vae, cycle_length=20, warmup_ratio=0.5, beta_max=beta),
     ]
 
 history = vae.fit(X_train, validation_data=(X_val,), epochs=epochs, batch_size=batch, callbacks=callbacks, verbose=1)
