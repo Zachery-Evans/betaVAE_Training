@@ -189,13 +189,13 @@ output_dim = input_dim
 
 batch = 32
 
-hidden_dims = [512, 256, 128]
+hidden_dims = [256, 128]
 
 latent_dim = 8
 
 beta = 3
 
-epochs = 15
+epochs = 20
 
 """
 Build the Encoder
@@ -219,7 +219,7 @@ Build the Decoder
 def make_decoder(output_dim, latent_dim, hidden):
     z_in = keras.Input(shape=(latent_dim,), name="z")
     x = z_in
-    for i, h in enumerate(hidden[2::-1]):
+    for i, h in enumerate(hidden[::-1]):
         x = layers.Dense(h, activation="relu", name=f"dec_dense_{i}")(x)
     x_out = layers.Dense(output_dim, activation="linear", name="x_recon")(x)
     return keras.Model(z_in, x_out, name="decoder")
@@ -235,7 +235,7 @@ Build the VAE Model and Train
 vae = BetaVAE(encoder, decoder, beta)
 
 vae.compile(
-    optimizer=keras.optimizers.Adam(learning_rate=5e-4)
+    optimizer=keras.optimizers.Adam(learning_rate=1e-3)
 )
 
 callbacks = [
