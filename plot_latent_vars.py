@@ -4,6 +4,7 @@ os.environ["KERAS BACKEND"] = "tensorflow"
 from sklearn.metrics import pairwise_distances
 import matplotlib.pyplot as plt
 from matplotlib import cm
+import matplotlib.ticker as ticker
 import pandas as pd
 import bvae_model as bvae
 import tensorflow as tf
@@ -92,7 +93,7 @@ for i, dim in enumerate(ranked_dims):
 # --- Parameters for traversal ---
 N_STEPS = 7                # how many points to sample per dim
 SIGMA_SCALE = 6.0          # ± range to explore
-TOP_N = 4 # how many top dims to visualize
+TOP_N = 2 # how many top dims to visualize
 wn = np.array(kept_wn)
 
 # --- Compute the latent mean for reference ---
@@ -120,7 +121,7 @@ for d in ranked_dims[:TOP_N]:
     traversed_spectra = np.array(traversed_spectra)
 
     # --- Plot with viridis colors ---
-    plt.figure(figsize=(8, 4))
+    fig, ax = plt.subplots(figsize=(12, 8))
 
     for i, (spec, val) in enumerate(zip(traversed_spectra, traversal_values)):
         # map i -> [0,1] for colormap
@@ -130,7 +131,7 @@ for d in ranked_dims[:TOP_N]:
             t = 0.5
         color = cmap(t)
 
-        plt.plot(
+        ax.plot(
             wn,
             spec,
             label=f"{val:.2f}",
@@ -138,16 +139,25 @@ for d in ranked_dims[:TOP_N]:
             lw=1.5
         )
 
-    plt.gca().invert_xaxis()
-    plt.xticks(fontsize=16)
-    plt.yticks(fontsize=16)
-    plt.xlabel("Wavenumber (cm$^{-1}$)", fontsize=16)
-    plt.ylabel("Intensity (a.u.)", fontsize=16)
-    plt.title(f"Latent dim {d} traversal (σ={std_d:.3f})", fontsize=16)
-    plt.legend(title="z value", fontsize=16)
-    plt.tight_layout()
-    #plt.savefig(f"Zero_offset_Latent_dim_{d}_traversal_sigma_{std_d:.3f}.jpeg",
-    #            dpi=300)
+    ax.invert_xaxis()
+    ax.tick_params(which='major', axis='x', labelsize=18)
+    ax.tick_params(which='minor', axis='x', length=5)
+    ax.xaxis.set_major_locator(ticker.MultipleLocator(100))
+    ax.xaxis.set_minor_locator(ticker.MultipleLocator(50))
+
+    ax.set_xlabel(r'Wavenumbers ($cm^{-1}$)', fontsize=18)
+    ax.set_ylabel("Intensity (a.u.)", fontsize=18)
+    ax.set_title(f"Latent dim {d} traversal (σ={std_d:.3f})", fontsize=18)
+
+    ax.legend(title="z value", fontsize=18)
+
+    fig.tight_layout()
+
+    # fig.savefig(
+    #     f"Zero_offset_Latent_dim_{d}_traversal_sigma_{std_d:.3f}.jpeg",
+    #     dpi=300
+    # )
+
     plt.show()
 
 """
