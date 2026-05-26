@@ -225,10 +225,6 @@ def cut_keep(wavenumbers, absorbances, lowerBound=898, upperBound=3998):
 
     return cut_wavenumbers, cut_absorbances
 
-import numpy as np
-from scipy.spatial import ConvexHull
-from scipy.interpolate import interp1d
-
 def rubberband_baseline(x, y):
     """
     Quasar/hyperSpec-style rubberband baseline.
