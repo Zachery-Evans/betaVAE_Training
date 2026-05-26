@@ -225,30 +225,54 @@ def cut_keep(wavenumbers, absorbances, lowerBound=898, upperBound=3998):
 
     return cut_wavenumbers, cut_absorbances
 
-def rubberband_baseline(wavenumbers, absorbance):
-    """
-    Calculate rubberband baseline.
-    
-    Arguments:
-        wavenumber {array} -- a numpy array 
-        absorbance {array} -- a numpy array
+import numpy as np
+from scipy.spatial import ConvexHull
+from scipy.interpolate import interp1d
 
-    Returns:
-        baseline {array} -- a numpy array
+def rubberband_baseline(x, y):
     """
-    x = np.asarray(wavenumbers, dtype=np.float64)
-    y = np.asarray(absorbance, dtype=np.float64)
-    points = list((zip(x, y)))
-    # Find the convex hull
-    v = ConvexHull(points).vertices
-    # Rotate convex hull vertices until they start from the lowest one
-    v = np.roll(v, -v.argmin())
-    # Leave only the ascending part
-    v = v[:v.argmax()]
+    Quasar/hyperSpec-style rubberband baseline.
+    """
 
-    # Create baseline using linear interpolation between vertices
-    baseline = np.interp(x, x[v], y[v]).astype('float')
-    
+    # Convex hull
+    points = np.column_stack([x, y])
+    hull = ConvexHull(points)
+
+    # Hull vertices
+    vertices = hull.vertices
+    vertices = np.sort(vertices)
+
+    # Keep lower hull only
+    lower = []
+
+    for v in vertices:
+        while len(lower) >= 2:
+            x1, y1 = points[lower[-2]]
+            x2, y2 = points[lower[-1]]
+            x3, y3 = points[v]
+
+            cross = ((x2 - x1)*(y3 - y1) -
+                     (y2 - y1)*(x3 - x1))
+
+            if cross <= 0:
+                lower.pop()
+            else:
+                break
+
+        lower.append(v)
+
+    lower = np.array(lower)
+
+    # FORCE endpoint inclusion
+    if lower[0] != 0:
+        lower = np.insert(lower, 0, 0)
+
+    if lower[-1] != len(x)-1:
+        lower = np.append(lower, len(x)-1)
+
+    # Linear interpolation baseline
+    baseline = np.interp(x, x[lower], y[lower])
+
     return baseline
 
 def calculate_peak_intensity(wavenumbers, intensities, wavenumber_range):
@@ -430,22 +454,43 @@ def thickness_normalizer(spectrum_array, IntStd):
 
 def process_region(f, a, low, high, use_poly=False):
     """Process a single spectral region."""
-    interpolated_wavenumber, interpolated_absorbance = interpolate_spectrum(f, a, low, high)
-    baseline1 = airpls(interpolated_absorbance)
-    corrected1 = interpolated_absorbance - baseline1
     
+    interpolated_wavenumber, interpolated_absorbance = interpolate_spectrum(
+        f, a, low, high
+    )
+
+    baseline1 = rubberband_baseline(interpolated_wavenumber, interpolated_absorbance)
+    corrected = interpolated_absorbance - baseline1
+
+    """
     if use_poly:
-        baseline2 = polynomial_background(interpolated_wavenumber, corrected1, odr=2, s=0.006, fct='atq')[0]
+        baseline2 = polynomial_background(
+            interpolated_wavenumber,
+            corrected1,
+            odr=2,
+            s=0.006,
+            fct='atq'
+        )[0]
     else:
-        baseline2 = rubberband_baseline(interpolated_wavenumber, corrected1)
+        baseline2 = rubberband_baseline(
+            interpolated_wavenumber,
+            corrected1
+        )
+
     corrected2 = corrected1 - baseline2
-    
+
     if use_poly:
-        baseline3 = rubberband_baseline(interpolated_wavenumber, corrected2)
-        corrected3 = corrected2 - baseline3
-        return interpolated_wavenumber, corrected3
+        baseline3 = rubberband_baseline(
+            interpolated_wavenumber,
+            corrected2
+        )
+        corrected = corrected2 - baseline3
     else:
-        return interpolated_wavenumber, corrected2
+        corrected = corrected2
+
+    """
+
+    return interpolated_wavenumber, corrected
 
 def pipeline(expt_wavenumber, expt_absorbance):
     f = expt_wavenumber
@@ -475,3 +520,4 @@ def pipeline(expt_wavenumber, expt_absorbance):
     wavenumber = wavenumber[:cutoff]
     
     return wavenumber, absorbance
+
