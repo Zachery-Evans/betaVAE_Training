@@ -189,13 +189,13 @@ output_dim = input_dim
 
 batch = 32
 
-hidden_dims = [256, 128]
+hidden_dims = [512, 256, 128]
 
 latent_dim = 8
 
 beta = 3
 
-epochs = 20
+epochs = 5
 
 """
 Build the Encoder
