@@ -121,7 +121,7 @@ for d in ranked_dims[:TOP_N]:
     traversed_spectra = np.array(traversed_spectra)
 
     # --- Plot with viridis colors ---
-    fig, ax = plt.subplots(figsize=(12, 8))
+    fig, ax = plt.subplots(figsize=(12, 10))
 
     for i, (spec, val) in enumerate(zip(traversed_spectra, traversal_values)):
         # map i -> [0,1] for colormap
@@ -136,20 +136,22 @@ for d in ranked_dims[:TOP_N]:
             spec,
             label=f"{val:.2f}",
             color=color,
-            lw=1.5
+            lw=5
         )
 
     ax.invert_xaxis()
-    ax.tick_params(which='major', axis='x', labelsize=18)
-    ax.tick_params(which='minor', axis='x', length=5)
+    ax.tick_params(which='major', axis='x', labelsize=32, length=5)
+    ax.tick_params(which='minor', axis='x', length=10)
     ax.xaxis.set_major_locator(ticker.MultipleLocator(100))
     ax.xaxis.set_minor_locator(ticker.MultipleLocator(50))
 
-    ax.set_xlabel(r'Wavenumbers ($cm^{-1}$)', fontsize=18)
-    ax.set_ylabel("Intensity (a.u.)", fontsize=18)
-    ax.set_title(f"Latent dim {d} traversal (σ={std_d:.3f})", fontsize=18)
+    ax.set_xlabel(r'Wavenumbers ($cm^{-1}$)', fontsize=32)
+    ax.set_ylabel("Intensity (a.u.)", fontsize=32)
+    ax.set_yticks([])
 
-    ax.legend(title="z value", fontsize=18)
+    ax.set_title(f"Latent dim {d} traversal (σ={std_d:.3f})", fontsize=32)
+
+    ax.legend(title="z value", title_fontsize=32, fontsize=32)
 
     fig.tight_layout()
 

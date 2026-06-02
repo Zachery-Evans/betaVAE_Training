@@ -169,7 +169,7 @@ trainingArray = np.asarray(betaVAE_trainingData.values, dtype=np.float32)
 
 X_train, X_val = train_test_split(trainingArray, train_size=0.8, test_size=0.2, shuffle=True)
 
-print(X_train.shape, X_val.shape)
+print("Training Data: ",X_train.shape,"Validation Data: ", X_val.shape)
 training_df = pd.DataFrame(data=X_train, columns=wavenumbers)
 training_df.to_csv("training_data.csv", index=False)
 validation_df = pd.DataFrame(data=X_val, columns=wavenumbers)
@@ -187,9 +187,9 @@ Define the model parameters
 input_dim = len(wavenumbers)
 output_dim = input_dim
 
-batch = 32
+batch = 4
 
-hidden_dims = [512, 256, 128]
+hidden_dims = [256, 128]
 
 latent_dim = 8
 

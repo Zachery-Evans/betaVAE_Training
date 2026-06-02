@@ -21,8 +21,7 @@ from sklearn.model_selection import train_test_split
 import spectrum_preprocessing as sp
 
 #load the saved encoder, and decoder
-
-loaded_decoder = tf.saved_model.load("./new_decoder")
+loaded_decoder = tf.saved_model.load("./new_decoder")   
 loaded_encoder = tf.saved_model.load("./new_encoder")
 
 def encoder(normalized_spectrum_array):
@@ -44,9 +43,9 @@ def encoder(normalized_spectrum_array):
     """
     normalized_spectrum_array = normalized_spectrum_array.astype('float32')
     encoded_spectrum = loaded_encoder([normalized_spectrum_array])
-    L1 = 1*np.array(encoded_spectrum[0])[0][5]
-    L2 = 1*np.array(encoded_spectrum[0])[0][10]
-    L3 = -1*np.array(encoded_spectrum[0])[0][7]
+    L1 = 1*np.array(encoded_spectrum[0])[0][7]
+    L2 = 1*np.array(encoded_spectrum[0])[0][0]
+    L3 = -1*np.array(encoded_spectrum[0])[0][4]
     
     return L1,L2,L3
 
